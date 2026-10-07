@@ -61,12 +61,21 @@ class SecretsController extends Notifier<SecretsState> {
 
   Future<void> _bootstrap() async {
     final ready = _ready;
+    debugPrint('[secrets] _bootstrap 开始读钥匙串…');
     try {
-      final (mail, llm) = await _store.loadAll();
+      // 逐键读取需要 id 清单：账号来自 space.yaml，LLM 来自 llm_profiles.yaml。
+      final spaces = await SpaceStore().loadAll();
+      final profiles = await LlmProfileStore().loadAll();
+      final (mail, llm) = await _store.loadAll(
+        accountIds: spaces.expand((s) => s.accounts).map((a) => a.id),
+        llmIds: profiles.map((p) => p.id),
+      );
+      debugPrint('[secrets] _bootstrap 完成：邮箱密码 ${mail.length} 条'
+          '（accountIds=${mail.keys.toList()}），LLM Key ${llm.length} 条');
       _set(SecretsState(mailPasswords: mail, llmApiKeys: llm, loaded: true));
-    } catch (e) {
-      // 钥匙串读取失败：按空表降级并置 loaded，调用方不至于永久等待。
-      debugPrint('读取钥匙串失败（按空密码处理）：$e');
+    } catch (e, s) {
+      // 钥匙串读取失败：按空表降级并置 loaded，避免调用方永久等待。
+      debugPrint('[secrets] _bootstrap 读取钥匙串失败（按空密码处理）：$e\n$s');
       _set(const SecretsState(loaded: true));
     } finally {
       ready.complete();
@@ -74,6 +83,8 @@ class SecretsController extends Notifier<SecretsState> {
   }
 
   Future<void> saveMailPassword(String accountId, String value) async {
+    debugPrint('[secrets] saveMailPassword(accountId=$accountId, '
+        '${value.isEmpty ? '空值(将删除)' : '非空'})');
     await _store.saveMailPassword(accountId, value);
     _set(SecretsState(
       mailPasswords: {...state.mailPasswords, accountId: value},
@@ -224,6 +235,9 @@ class SpacesController extends Notifier<SpacesState> {
   @override
   SpacesState build() {
     _store.loadAll().then((spaces) {
+      debugPrint('[spaces] 加载 ${spaces.length} 个空间：'
+          '${spaces.map((s) => '${s.name}（账号：'
+              '${s.accounts.map((a) => '${a.email}|${a.id}').join('、')}）').join('；')}');
       _set(SpacesState(spaces: spaces, loaded: true));
     });
     return const SpacesState();
@@ -471,7 +485,9 @@ class LearnController extends Notifier<LearnRunState> {
     final secrets = ref.read(secretsProvider);
     final usable = <MailAccountConfig>[];
     for (final a in space.accounts) {
-      if (MailService(a, secrets.mailPasswords[a.id]).isReceiveReady) {
+      final ok = MailService(a, secrets.mailPasswords[a.id]).isReceiveReady;
+      debugPrint('[learn] ${a.email} 可用=$ok（accountId=${a.id}）');
+      if (ok) {
         usable.add(a);
       }
     }
@@ -749,9 +765,14 @@ class InboxController extends Notifier<InboxState> {
     final all = <EmailSummary>[];
     final errors = <String>[];
     for (final account in receivers) {
-      final mail = MailService(account, secrets.mailPasswords[account.id]);
+      final pwd = secrets.mailPasswords[account.id];
+      final mail = MailService(account, pwd);
       if (!mail.isReceiveReady) {
-        errors.add('${account.email}：配置不完整（缺 IMAP 服务器或密码）');
+        final reason = account.isReceiveConfigured
+            ? '缺密码（钥匙串未返回该账号的授权码，accountId=${account.id}）'
+            : '缺 IMAP 服务器配置';
+        debugPrint('[inbox] ${account.email} 未就绪：$reason');
+        errors.add('${account.email}：配置不完整（$reason）');
         continue;
       }
       try {

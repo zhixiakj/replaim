@@ -1,12 +1,15 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show appFlavor;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// 敏感信息存取抽象（便于测试注入内存实现）。
+///
+/// 注意：有意不提供 readAll——flutter_secure_storage 在 macOS 传统钥匙串上
+/// 的 readAll 组合查询会返回 -50（见 SecretStore.loadAll 注释）。
 abstract class SecretStorage {
   Future<String?> read(String key);
   Future<void> write(String key, String value);
   Future<void> delete(String key);
-  Future<Map<String, String>> readAll();
 }
 
 /// flutter_secure_storage 实现。
@@ -32,18 +35,29 @@ class SecureSecretStorage implements SecretStorage {
 
   final FlutterSecureStorage _storage;
 
-  @override
-  Future<String?> read(String key) => _storage.read(key: key);
+  /// 当前使用的钥匙串 service（仅日志输出用；dev 与正式版互相隔离）。
+  String get _service => appFlavor == 'dev'
+      ? _devKeychainService
+      : AppleOptions.defaultAccountName;
 
   @override
-  Future<void> write(String key, String value) =>
-      _storage.write(key: key, value: value);
+  Future<String?> read(String key) async {
+    final v = await _storage.read(key: key);
+    debugPrint('[secrets] read "$key" @$_service -> ${v == null ? "无" : "非空"}');
+    return v;
+  }
 
   @override
-  Future<void> delete(String key) => _storage.delete(key: key);
+  Future<void> write(String key, String value) async {
+    await _storage.write(key: key, value: value);
+    debugPrint('[secrets] write "$key" @$_service 完成');
+  }
 
   @override
-  Future<Map<String, String>> readAll() => _storage.readAll();
+  Future<void> delete(String key) async {
+    await _storage.delete(key: key);
+    debugPrint('[secrets] delete "$key" @$_service 完成');
+  }
 }
 
 /// 测试用内存实现。
@@ -58,9 +72,6 @@ class MemorySecretStorage implements SecretStorage {
 
   @override
   Future<void> delete(String key) async => _map.remove(key);
-
-  @override
-  Future<Map<String, String>> readAll() async => Map.of(_map);
 }
 
 /// 敏感信息按命名空间键读写：
@@ -99,18 +110,24 @@ class SecretStore {
   Future<void> deleteLlmApiKey(String llmId) =>
       _storage.delete(llmPrefix + llmId);
 
-  /// 一次读出全部命名空间键，返回 (邮箱密码表, LLM Key 表)。
-  Future<(Map<String, String>, Map<String, String>)> loadAll() async {
-    final all = await _storage.readAll();
+  /// 按已知的账号 / LLM id 逐键读取，返回 (邮箱密码表, LLM Key 表)。
+  ///
+  /// 不用插件的 readAll：flutter_secure_storage 11.2.0（darwin 0.4.3）在
+  /// macOS 传统钥匙串上 readAll 的组合查询恒返回 -50，而单键 read 正常。
+  Future<(Map<String, String>, Map<String, String>)> loadAll({
+    required Iterable<String> accountIds,
+    required Iterable<String> llmIds,
+  }) async {
     final mail = <String, String>{};
+    for (final id in accountIds) {
+      final v = await mailPassword(id);
+      if (v != null && v.isNotEmpty) mail[id] = v;
+    }
     final llm = <String, String>{};
-    all.forEach((key, value) {
-      if (key.startsWith(mailPrefix)) {
-        mail[key.substring(mailPrefix.length)] = value;
-      } else if (key.startsWith(llmPrefix)) {
-        llm[key.substring(llmPrefix.length)] = value;
-      }
-    });
+    for (final id in llmIds) {
+      final v = await llmApiKey(id);
+      if (v != null && v.isNotEmpty) llm[id] = v;
+    }
     return (mail, llm);
   }
 

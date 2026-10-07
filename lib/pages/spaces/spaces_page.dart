@@ -494,9 +494,14 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
           }
           await ref.read(spacesProvider.notifier).save(fresh);
           if (password != null && password.isNotEmpty) {
+            debugPrint('[spaces] 保存 ${account.email} 的密码到钥匙串'
+                '（accountId=${account.id}）');
             await ref
                 .read(secretsProvider.notifier)
                 .saveMailPassword(account.id, password);
+          } else {
+            debugPrint('[spaces] ${account.email} 密码框为空，跳过写钥匙串、'
+                '保留旧密码（accountId=${account.id}）');
           }
         },
       ),
@@ -703,6 +708,18 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
   bool _testing = false;
   String? _testResult;
 
+  /// 已存密码的占位掩码（配合 obscureText 显示为一排圆点）。
+  static const _pwdMask = '••••••••';
+
+  /// 剔除掩码字符后的有效输入；为空表示沿用旧密码。
+  ///
+  /// 真实授权码不含 '•'，所以无论是完整掩码、删了几位还是在掩码后追加
+  /// 输入，剔除后得到的都恰好是用户真正敲入的内容。
+  String? get _effectivePassword {
+    final cleaned = _password.text.replaceAll('•', '');
+    return cleaned.isEmpty ? null : cleaned;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -714,6 +731,10 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
     _smtpHost = TextEditingController(text: m?.smtpHost ?? '');
     _smtpPort = TextEditingController(text: '${m?.smtpPort ?? 465}');
     _password = TextEditingController();
+    if (m != null &&
+        (ref.read(secretsProvider).mailPasswords[m.id] ?? '').isNotEmpty) {
+      _password.text = _pwdMask;
+    }
     _imapSecure = m?.imapSecure ?? true;
     _smtpSecure = m?.smtpSecure ?? true;
     _receiveEnabled = m?.receiveEnabled ?? true;
@@ -754,16 +775,15 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
     }
     final account = _buildFromForm();
     Navigator.pop(context);
-    await widget.onSaved(account, _password.text);
+    await widget.onSaved(account, _effectivePassword);
   }
 
   Future<void> _test() async {
     setState(() => _testing = true);
     final account = _buildFromForm();
-    // 密码留空时用已存密码测试。
-    final password = _password.text.isNotEmpty
-        ? _password.text
-        : ref.read(secretsProvider).mailPasswords[account.id];
+    // 密码框只有掩码或留空时用已存密码测试。
+    final password = _effectivePassword ??
+        ref.read(secretsProvider).mailPasswords[account.id];
     final error = await MailService(account, password).testConnection();
     if (mounted) {
       setState(() {
@@ -771,6 +791,18 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
         _testResult = error ?? '连接成功（IMAP 登录并读取文件夹正常）';
       });
     }
+  }
+
+  /// 密码框提示：反映钥匙串里是否已存该账号的密码（密码本体不回填）。
+  String get _passwordHelper {
+    final m = widget.existing;
+    if (m == null) {
+      return 'QQ、163 等需在邮箱后台生成授权码；保存后加密存入系统钥匙串';
+    }
+    final saved = ref.watch(secretsProvider).mailPasswords[m.id] ?? '';
+    return saved.isNotEmpty
+        ? '已保存授权码（框内圆点仅为占位）；更换时直接输入新授权码'
+        : '尚未保存密码';
   }
 
   @override
@@ -811,9 +843,8 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
                 title: const Text('SMTP 加密（465=SSL / 587=STARTTLS）'),
                 dense: true,
               ),
-              _field(_password,
-                  '密码 / 授权码（QQ、163 等需用授权码；编辑时留空保持不变）',
-                  obscure: true),
+              _field(_password, '密码 / 授权码',
+                  obscure: true, helper: _passwordHelper),
               SwitchListTile(
                 value: _receiveEnabled,
                 onChanged: (v) => setState(() => _receiveEnabled = v),
@@ -866,7 +897,7 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
   }
 
   Widget _field(TextEditingController c, String label,
-          {bool obscure = false, bool num = false}) =>
+          {bool obscure = false, bool num = false, String? helper}) =>
       Padding(
         padding: const EdgeInsets.only(bottom: 10),
         child: TextField(
@@ -875,6 +906,7 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
           keyboardType: num ? TextInputType.number : null,
           decoration: InputDecoration(
             labelText: label,
+            helperText: helper,
             border: const OutlineInputBorder(),
             isDense: true,
           ),
