@@ -14,6 +14,7 @@ class EmailSummary {
     this.referencesIds = const [],
     this.accountId = '',
     this.originalRecipients = const [],
+    this.uid,
   });
 
   /// Message-ID 头（含尖括号）。极少数邮件缺失时以合成值兜底。
@@ -46,6 +47,9 @@ class EmailSummary {
   /// 回信时需要抄送，保持客户视角线程一致。
   final List<String> originalRecipients;
 
+  /// 所在文件夹内的 IMAP UID，增量同步的合并与 lastUid 追踪用。
+  final int? uid;
+
   DateTime? get parsedDate => DateTime.tryParse(date);
 
   /// 线程键：优先用 References/In-Reply-To 的根，否则用归一化主题。
@@ -72,4 +76,42 @@ class EmailSummary {
     buf.writeln(body.isEmpty ? '（无正文）' : body);
     return buf.toString();
   }
+
+  Map<String, dynamic> toMap() => {
+        'message_id': messageId,
+        'subject': subject,
+        'from_address': fromAddress,
+        'to_addresses': toAddresses,
+        'date': date,
+        'folder': folder,
+        'body_text': bodyText,
+        'snippet': snippet,
+        'in_reply_to': inReplyTo,
+        'references_ids': referencesIds,
+        'account_id': accountId,
+        'original_recipients': originalRecipients,
+        'uid': uid,
+      };
+
+  static EmailSummary fromMap(Map<dynamic, dynamic> map) => EmailSummary(
+        messageId: map['message_id'] as String? ?? '',
+        subject: map['subject'] as String? ?? '',
+        fromAddress: map['from_address'] as String? ?? '',
+        toAddresses: (map['to_addresses'] as List? ?? [])
+            .map((e) => e.toString())
+            .toList(),
+        date: map['date'] as String? ?? '',
+        folder: map['folder'] as String? ?? '',
+        bodyText: map['body_text'] as String? ?? '',
+        snippet: map['snippet'] as String? ?? '',
+        inReplyTo: map['in_reply_to'] as String?,
+        referencesIds: (map['references_ids'] as List? ?? [])
+            .map((e) => e.toString())
+            .toList(),
+        accountId: map['account_id'] as String? ?? '',
+        originalRecipients: (map['original_recipients'] as List? ?? [])
+            .map((e) => e.toString())
+            .toList(),
+        uid: map['uid'] as int?,
+      );
 }

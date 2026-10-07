@@ -61,7 +61,6 @@ class SecretsController extends Notifier<SecretsState> {
 
   Future<void> _bootstrap() async {
     final ready = _ready;
-    debugPrint('[secrets] _bootstrap 开始读钥匙串…');
     try {
       // 逐键读取需要 id 清单：账号来自 space.yaml，LLM 来自 llm_profiles.yaml。
       final spaces = await SpaceStore().loadAll();
@@ -70,8 +69,6 @@ class SecretsController extends Notifier<SecretsState> {
         accountIds: spaces.expand((s) => s.accounts).map((a) => a.id),
         llmIds: profiles.map((p) => p.id),
       );
-      debugPrint('[secrets] _bootstrap 完成：邮箱密码 ${mail.length} 条'
-          '（accountIds=${mail.keys.toList()}），LLM Key ${llm.length} 条');
       _set(SecretsState(mailPasswords: mail, llmApiKeys: llm, loaded: true));
     } catch (e, s) {
       // 钥匙串读取失败：按空表降级并置 loaded，避免调用方永久等待。
@@ -83,8 +80,6 @@ class SecretsController extends Notifier<SecretsState> {
   }
 
   Future<void> saveMailPassword(String accountId, String value) async {
-    debugPrint('[secrets] saveMailPassword(accountId=$accountId, '
-        '${value.isEmpty ? '空值(将删除)' : '非空'})');
     await _store.saveMailPassword(accountId, value);
     _set(SecretsState(
       mailPasswords: {...state.mailPasswords, accountId: value},
@@ -235,9 +230,6 @@ class SpacesController extends Notifier<SpacesState> {
   @override
   SpacesState build() {
     _store.loadAll().then((spaces) {
-      debugPrint('[spaces] 加载 ${spaces.length} 个空间：'
-          '${spaces.map((s) => '${s.name}（账号：'
-              '${s.accounts.map((a) => '${a.email}|${a.id}').join('、')}）').join('；')}');
       _set(SpacesState(spaces: spaces, loaded: true));
     });
     return const SpacesState();
@@ -485,9 +477,7 @@ class LearnController extends Notifier<LearnRunState> {
     final secrets = ref.read(secretsProvider);
     final usable = <MailAccountConfig>[];
     for (final a in space.accounts) {
-      final ok = MailService(a, secrets.mailPasswords[a.id]).isReceiveReady;
-      debugPrint('[learn] ${a.email} 可用=$ok（accountId=${a.id}）');
-      if (ok) {
+      if (MailService(a, secrets.mailPasswords[a.id]).isReceiveReady) {
         usable.add(a);
       }
     }
@@ -726,6 +716,7 @@ class InboxState {
     this.error,
     this.selected,
     this.threadPeers = const [],
+    this.refreshed = false,
   });
 
   final List<EmailSummary> messages;
@@ -735,33 +726,58 @@ class InboxState {
 
   /// 选中邮件的同线程往来。
   final List<EmailSummary> threadPeers;
+
+  /// 本次 provider 生命周期内是否已同步过（冷启动自动刷新只触发一次）。
+  final bool refreshed;
 }
 
 class InboxController extends Notifier<InboxState> {
+  InboxCacheStore _cacheStore = InboxCacheStore();
+
   @override
   InboxState build() {
     // 切换空间时重置收件箱（依赖 currentSpace 的空间 ID 变化）。
-    ref.watch(currentSpaceProvider);
+    final spaceId = ref.watch(currentSpaceProvider).space?.id ?? '';
+    final store = InboxCacheStore(spaceId: spaceId);
+    _cacheStore = store;
+    final accountIds = ref
+            .read(currentSpaceProvider)
+            .space
+            ?.receiveAccounts
+            .map((a) => a.id)
+            .toSet() ??
+        const <String>{};
+    // 先秒显缓存，后台 refresh（InboxPage 发起）再用新数据替换。
+    store.loadAll(accountIds).then((cached) {
+      if (!identical(_cacheStore, store)) return; // 空间已切换，丢弃过期结果。
+      if (state.messages.isNotEmpty) return; // refresh 已产出更新的数据。
+      _set(InboxState(messages: cached, refreshed: state.refreshed));
+    });
     return const InboxState();
   }
 
-  /// 遍历空间内全部收信账号拉取，按时间倒序合并；单账号失败不中断。
-  Future<void> refresh() async {
+  /// 遍历空间内全部收信账号同步，按时间倒序合并；单账号失败不中断。
+  ///
+  /// [fullResync] 为 true 时忽略缓存全量重建（手动"完全刷新"）；
+  /// 缓存超过 24 小时未全量也会自动走全量，顺带清理服务器已删邮件的残留。
+  Future<void> refresh({bool fullResync = false}) async {
     final space = ref.read(currentSpaceProvider).space;
     if (space == null || space.accounts.isEmpty) {
-      _set(const InboxState(error: '请先在「空间」页创建空间并配置邮箱账号'));
+      _set(const InboxState(
+          error: '请先在「空间」页创建空间并配置邮箱账号', refreshed: true));
       return;
     }
     final receivers = space.receiveAccounts;
     if (receivers.isEmpty) {
-      _set(const InboxState(error: '当前空间没有开启收信的账号'));
+      _set(const InboxState(error: '当前空间没有开启收信的账号', refreshed: true));
       return;
     }
     // 冷启动竞态防护：等钥匙串密码读入内存，再判断配置完整性。
     await ref.read(secretsProvider.notifier).ready;
     final secrets = ref.read(secretsProvider);
-    _set(InboxState(messages: state.messages, loading: true));
+    _set(InboxState(messages: state.messages, loading: true, refreshed: true));
     final addresses = space.accountAddresses;
+    final store = InboxCacheStore(spaceId: space.id);
     final all = <EmailSummary>[];
     final errors = <String>[];
     for (final account in receivers) {
@@ -769,41 +785,89 @@ class InboxController extends Notifier<InboxState> {
       final mail = MailService(account, pwd);
       if (!mail.isReceiveReady) {
         final reason = account.isReceiveConfigured
-            ? '缺密码（钥匙串未返回该账号的授权码，accountId=${account.id}）'
+            ? '缺密码（钥匙串未返回该账号的授权码）'
             : '缺 IMAP 服务器配置';
-        debugPrint('[inbox] ${account.email} 未就绪：$reason');
         errors.add('${account.email}：配置不完整（$reason）');
         continue;
       }
+      InboxCacheEntry? cached;
       try {
-        all.addAll(await mail.fetchRecent(
-            limit: 50, accountId: account.id, spaceAddresses: addresses));
+        cached = await store.load(account.id);
       } catch (e) {
-        errors.add('${account.email}：$e');
+        debugPrint('[inbox] 读缓存失败 ${account.email}：$e');
+      }
+      final forceFull = fullResync ||
+          (cached != null &&
+              DateTime.now().difference(cached.fetchedAt).inHours >= 24);
+      try {
+        final result = await mail.fetchIncremental(
+          limit: 50,
+          accountId: account.id,
+          spaceAddresses: addresses,
+          cachedUidValidity: forceFull ? null : cached?.uidValidity,
+          cachedLastUid: forceFull ? null : cached?.lastUid,
+          cachedMessages: forceFull ? const [] : cached?.messages ?? const [],
+        );
+        if (result.fullResync) {
+          debugPrint(
+              '[inbox] ${account.email} 全量同步 ${result.messages.length} 封');
+        }
+        all.addAll(result.messages);
+        try {
+          await store.save(
+            account.id,
+            InboxCacheEntry(
+              messages: result.messages,
+              uidValidity: result.uidValidity,
+              lastUid: result.lastUid,
+            ),
+          );
+        } catch (e) {
+          debugPrint('[inbox] 写缓存失败 ${account.email}：$e');
+        }
+      } catch (e) {
+        // 同步失败但缓存有数据：保留缓存展示，离线不清空列表。
+        if (cached != null && cached.messages.isNotEmpty) {
+          all.addAll(cached.messages);
+          errors.add('${account.email}：同步失败（展示缓存）：$e');
+        } else {
+          errors.add('${account.email}：$e');
+        }
       }
     }
     all.sort((a, b) =>
         (b.parsedDate ?? DateTime(2000)).compareTo(a.parsedDate ?? DateTime(2000)));
+    try {
+      await store.prune(receivers.map((a) => a.id).toSet());
+    } catch (e) {
+      debugPrint('[inbox] 清理失效缓存失败：$e');
+    }
     _set(InboxState(
       messages: all,
       error: errors.isEmpty ? null : '部分账号拉取失败：${errors.join('；')}',
+      refreshed: true,
     ));
   }
 
   Future<void> select(EmailSummary? email) async {
     if (email == null) {
-      _set(InboxState(messages: state.messages));
+      _set(InboxState(
+          messages: state.messages, refreshed: state.refreshed));
       return;
     }
     _set(InboxState(
       messages: state.messages,
       selected: email,
       loading: true,
+      refreshed: state.refreshed,
     ));
     final space = ref.read(currentSpaceProvider).space;
     final account = space?.accountById(email.accountId);
     if (account == null) {
-      _set(InboxState(messages: state.messages, selected: email));
+      _set(InboxState(
+          messages: state.messages,
+          selected: email,
+          refreshed: state.refreshed));
       return;
     }
     final pwd = ref.read(secretsProvider).mailPasswords[account.id];
@@ -814,9 +878,13 @@ class InboxController extends Notifier<InboxState> {
         messages: state.messages,
         selected: email,
         threadPeers: peers,
+        refreshed: state.refreshed,
       ));
     } catch (_) {
-      _set(InboxState(messages: state.messages, selected: email));
+      _set(InboxState(
+          messages: state.messages,
+          selected: email,
+          refreshed: state.refreshed));
     }
   }
 

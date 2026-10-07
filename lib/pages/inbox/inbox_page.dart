@@ -19,7 +19,7 @@ class _InboxPageState extends ConsumerState<InboxPage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (ref.read(inboxProvider).messages.isEmpty) {
+      if (!ref.read(inboxProvider).refreshed) {
         ref.read(inboxProvider.notifier).refresh();
       }
     });
@@ -43,20 +43,28 @@ class _InboxPageState extends ConsumerState<InboxPage> {
                   children: [
                     Text('收件箱', style: Theme.of(context).textTheme.titleLarge),
                     const Spacer(),
-                    IconButton(
-                      tooltip: '刷新',
-                      onPressed: state.loading
-                          ? null
-                          : () => ref.read(inboxProvider.notifier).refresh(),
-                      icon: state.loading
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child:
-                                  CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.refresh),
-                    ),
+                    if (state.loading)
+                      const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    else
+                      PopupMenuButton<String>(
+                        tooltip: '刷新',
+                        icon: const Icon(Icons.refresh),
+                        onSelected: (value) => ref
+                            .read(inboxProvider.notifier)
+                            .refresh(fullResync: value == 'full'),
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                              value: 'incremental',
+                              child: Text('刷新（只拉新邮件）')),
+                          PopupMenuItem(
+                              value: 'full',
+                              child: Text('完全刷新（重建缓存）')),
+                        ],
+                      ),
                   ],
                 ),
               ),

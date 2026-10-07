@@ -5,6 +5,7 @@ import 'package:enough_mail/enough_mail.dart' show SocketType;
 
 import '../models/email_summary.dart';
 import '../models/mail_space.dart';
+import 'stores.dart';
 
 /// 邮件服务：IMAP 收件 + SMTP 发件（enough_mail 高层 API）。
 ///
@@ -97,17 +98,94 @@ class MailService {
           ? await client.selectInbox()
           : await _selectByName(client, folder);
       if (mailbox == null) return [];
-      final messages = await client.fetchMessages(
-        mailbox: mailbox,
-        count: limit,
-        fetchPreference: mail.FetchPreference.fullWhenWithinSize,
-      );
-      return messages
-          .map((m) => _toSummary(m, folder, accountId, spaceAddresses))
-          .toList();
+      return await _fetchSummaries(
+          client, mailbox, folder, limit, accountId, spaceAddresses);
     } finally {
       await client.disconnect();
     }
+  }
+
+  /// 增量同步 INBOX（配合 InboxCacheStore 的缓存状态）：
+  /// - 无缓存 / UIDVALIDITY 与服务器不一致 → 全量拉最近 [limit] 封重建；
+  /// - uidNext 显示积压新邮件超过 [limit] 封（离线太久）→ 同样走全量；
+  /// - uidNext 显示没有新邮件 → 一条 FETCH 都不发，缓存原样返回；
+  /// - 其余情况只 FETCH lastUid 之后的新邮件（含正文），与缓存合并去重。
+  Future<InboxSyncResult> fetchIncremental({
+    int limit = 50,
+    String accountId = '',
+    Set<String> spaceAddresses = const {},
+    int? cachedUidValidity,
+    int? cachedLastUid,
+    List<EmailSummary> cachedMessages = const [],
+  }) async {
+    final client = await _connect();
+    try {
+      final mailbox = await client.selectInbox();
+      final uidValidity = mailbox.uidValidity;
+      final uidNext = mailbox.uidNext;
+      final incrementalOk = uidValidity != null &&
+          cachedUidValidity == uidValidity &&
+          cachedLastUid != null &&
+          cachedLastUid > 0 &&
+          cachedMessages.isNotEmpty;
+      final backlog = (uidNext == null || cachedLastUid == null)
+          ? null
+          : uidNext - 1 - cachedLastUid;
+      if (!incrementalOk || (backlog != null && backlog > limit)) {
+        final fresh = await _fetchSummaries(
+            client, mailbox, 'INBOX', limit, accountId, spaceAddresses);
+        return InboxSyncResult(
+          messages: fresh,
+          uidValidity: uidValidity,
+          lastUid: _maxUid(fresh) ?? cachedLastUid,
+          fullResync: true,
+        );
+      }
+      if (backlog != null && backlog <= 0) {
+        return InboxSyncResult(
+          messages: cachedMessages,
+          uidValidity: uidValidity,
+          lastUid: cachedLastUid,
+        );
+      }
+      final fetched = await client.fetchMessageSequence(
+        mail.MessageSequence.fromRangeToLast(cachedLastUid + 1,
+            isUidSequence: true),
+        fetchPreference: mail.FetchPreference.fullWhenWithinSize,
+      );
+      // UID x:* 在 x 超过现存最大 UID 时仍会返回最后一封，需按 UID 过滤。
+      final fresh = fetched
+          .where((m) => (m.uid ?? 0) > cachedLastUid)
+          .map((m) => _toSummary(m, 'INBOX', accountId, spaceAddresses))
+          .toList();
+      final merged = mergeInboxMessages(cachedMessages, fresh, limit: limit);
+      return InboxSyncResult(
+        messages: merged,
+        uidValidity: uidValidity,
+        lastUid: _maxUid(fresh) ?? cachedLastUid,
+      );
+    } finally {
+      await client.disconnect();
+    }
+  }
+
+  /// 选中文件夹后拉取最近 [limit] 封并转成应用模型。
+  Future<List<EmailSummary>> _fetchSummaries(
+    mail.MailClient client,
+    mail.Mailbox mailbox,
+    String folder,
+    int limit,
+    String accountId,
+    Set<String> spaceAddresses,
+  ) async {
+    final messages = await client.fetchMessages(
+      mailbox: mailbox,
+      count: limit,
+      fetchPreference: mail.FetchPreference.fullWhenWithinSize,
+    );
+    return messages
+        .map((m) => _toSummary(m, folder, accountId, spaceAddresses))
+        .toList();
   }
 
   Future<mail.Mailbox?> _selectByName(mail.MailClient client, String name) async {
@@ -221,6 +299,7 @@ class MailService {
       accountId: accountId,
       originalRecipients:
           detectForwardedRecipients([...toAddresses, ...ccAddresses], spaceAddresses),
+      uid: m.uid,
     );
   }
 
@@ -253,4 +332,31 @@ class MailException implements Exception {
 
   @override
   String toString() => message;
+}
+
+/// 一次 INBOX 增量同步的结果。
+class InboxSyncResult {
+  const InboxSyncResult({
+    required this.messages,
+    this.uidValidity,
+    this.lastUid,
+    this.fullResync = false,
+  });
+
+  /// 合并后的全量列表（≤ limit 封）。
+  final List<EmailSummary> messages;
+  final int? uidValidity;
+  final int? lastUid;
+
+  /// 本次走了全量重建路径（首次同步 / UIDVALIDITY 变化 / 积压超限）。
+  final bool fullResync;
+}
+
+int? _maxUid(Iterable<EmailSummary> messages) {
+  int? max;
+  for (final m in messages) {
+    final uid = m.uid;
+    if (uid != null && (max == null || uid > max)) max = uid;
+  }
+  return max;
 }

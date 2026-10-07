@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show appFlavor;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -35,29 +34,15 @@ class SecureSecretStorage implements SecretStorage {
 
   final FlutterSecureStorage _storage;
 
-  /// 当前使用的钥匙串 service（仅日志输出用；dev 与正式版互相隔离）。
-  String get _service => appFlavor == 'dev'
-      ? _devKeychainService
-      : AppleOptions.defaultAccountName;
+  @override
+  Future<String?> read(String key) => _storage.read(key: key);
 
   @override
-  Future<String?> read(String key) async {
-    final v = await _storage.read(key: key);
-    debugPrint('[secrets] read "$key" @$_service -> ${v == null ? "无" : "非空"}');
-    return v;
-  }
+  Future<void> write(String key, String value) =>
+      _storage.write(key: key, value: value);
 
   @override
-  Future<void> write(String key, String value) async {
-    await _storage.write(key: key, value: value);
-    debugPrint('[secrets] write "$key" @$_service 完成');
-  }
-
-  @override
-  Future<void> delete(String key) async {
-    await _storage.delete(key: key);
-    debugPrint('[secrets] delete "$key" @$_service 完成');
-  }
+  Future<void> delete(String key) => _storage.delete(key: key);
 }
 
 /// 测试用内存实现。

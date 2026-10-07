@@ -13,6 +13,7 @@ import 'package:path_provider/path_provider.dart';
 ///     learn_state.yaml         本空间历史邮件学习状态
 ///     knowledge_base/          本空间知识库文档副本 + kb_index.yaml
 ///     drafts/                  本空间草稿记录（每条一个 YAML）
+///     inbox_cache/             本空间收件箱离线缓存（每账号一个 YAML）
 ///
 /// 旧版单空间布局（config/ rules/ learn_state.yaml knowledge_base/ drafts/
 /// 直接位于根下）由 SpaceMigrator 在启动时迁移，legacy* 路径仅供迁移读取。
@@ -61,6 +62,8 @@ class AppPaths {
       File(p.join(spaceDir(spaceId).path, 'learn_state.yaml'));
   Directory draftsDirFor(String spaceId) =>
       Directory(p.join(spaceDir(spaceId).path, 'drafts'));
+  Directory inboxCacheDirFor(String spaceId) =>
+      Directory(p.join(spaceDir(spaceId).path, 'inbox_cache'));
 
   // ---------------- 旧版布局（仅迁移读取） ----------------
 

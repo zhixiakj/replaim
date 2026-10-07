@@ -494,14 +494,9 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
           }
           await ref.read(spacesProvider.notifier).save(fresh);
           if (password != null && password.isNotEmpty) {
-            debugPrint('[spaces] 保存 ${account.email} 的密码到钥匙串'
-                '（accountId=${account.id}）');
             await ref
                 .read(secretsProvider.notifier)
                 .saveMailPassword(account.id, password);
-          } else {
-            debugPrint('[spaces] ${account.email} 密码框为空，跳过写钥匙串、'
-                '保留旧密码（accountId=${account.id}）');
           }
         },
       ),

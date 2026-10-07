@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show appFlavor;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
@@ -10,7 +9,6 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppPaths.init();
   await AppPaths.instance.ensureAll();
-  debugPrint('[boot] flavor=$appFlavor，数据目录=${AppPaths.instance.root}');
   // 旧版单空间布局 → 默认空间（全新安装 / 已迁移时为空操作）。
   await SpaceMigrator().migrateIfNeeded();
   runApp(const ProviderScope(child: ReplaimApp()));
