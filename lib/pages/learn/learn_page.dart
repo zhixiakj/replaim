@@ -10,7 +10,9 @@ class LearnPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(learnProvider);
-    final config = ref.watch(configProvider).config;
+    final space = ref.watch(currentSpaceProvider).space;
+    final learnFolders = space?.learnFolders ?? const ['Sent'];
+    final learnMonths = space?.learnMonths ?? 12;
     final notifier = ref.read(learnProvider.notifier);
     final consumed = notifier.learnState.consumed;
     final recent = consumed.length > 200 ? consumed.sublist(consumed.length - 200) : consumed;
@@ -38,9 +40,9 @@ class LearnPage extends ConsumerWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          '从「${config.learnFolders.join('、')}」近 ${config.learnMonths} 个月的历史往来中提炼回复规则。'
+          '从「${learnFolders.join('、')}」近 $learnMonths 个月的历史往来中提炼回复规则（空间内全部账号逐一学习）。'
           '已学习过的邮件不会重复使用；邮件按时间升序处理、冲突时新邮件优先，'
-          '保证旧邮件不会覆盖新邮件沉淀的规则。学习范围可在设置中调整。',
+          '保证旧邮件不会覆盖新邮件沉淀的规则。学习范围可在「空间」页调整。',
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 16),

@@ -5,12 +5,13 @@ import 'id_gen.dart';
 import 'paths.dart';
 import 'yaml_io.dart';
 
-/// 规则库存储：rules.yaml 的加载与全部变更操作。
+/// 规则库存储：空间内 rules.yaml 的加载与全部变更操作。
 ///
 /// 所有变更都走单一入口 [_save]，保证文件与内存一致；
 /// 规则更新时旧内容进 history，冲突替代走 supersede（不物理删除）。
 class RuleStore {
-  RuleStore([File? file]) : _file = file ?? File(AppPaths.instance.rulesFile);
+  RuleStore({String spaceId = '', File? file})
+      : _file = file ?? AppPaths.instance.rulesFileFor(spaceId);
 
   final File _file;
   List<Rule> _rules = [];

@@ -6,10 +6,10 @@ import 'id_gen.dart';
 import 'paths.dart';
 import 'yaml_io.dart';
 
-/// 学习状态存储（learn_state.yaml）。
+/// 学习状态存储（空间内 learn_state.yaml）。
 class LearnStateStore {
-  LearnStateStore([File? file])
-      : _file = file ?? File(AppPaths.instance.learnStateFile);
+  LearnStateStore({String spaceId = '', File? file})
+      : _file = file ?? AppPaths.instance.learnStateFileFor(spaceId);
 
   final File _file;
   LearnState _state = LearnState.empty();
@@ -27,10 +27,10 @@ class LearnStateStore {
   }
 }
 
-/// 草稿存储（`drafts/<id>.yaml`，每条草稿一个文件，便于追溯）。
+/// 草稿存储（空间内 `drafts/<id>.yaml`，每条草稿一个文件，便于追溯）。
 class DraftStore {
-  DraftStore([Directory? dir])
-      : _dir = dir ?? Directory(AppPaths.instance.draftsDir);
+  DraftStore({String spaceId = '', Directory? dir})
+      : _dir = dir ?? AppPaths.instance.draftsDirFor(spaceId);
 
   final Directory _dir;
 

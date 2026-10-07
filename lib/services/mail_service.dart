@@ -3,12 +3,13 @@ import 'dart:async';
 import 'package:enough_mail/enough_mail.dart' as mail;
 import 'package:enough_mail/enough_mail.dart' show SocketType;
 
-import '../models/app_config.dart';
 import '../models/email_summary.dart';
+import '../models/mail_space.dart';
 
 /// 邮件服务：IMAP 收件 + SMTP 发件（enough_mail 高层 API）。
 ///
 /// 桌面端长期运行，每次操作独立连接、用完即断，避免 IMAP 空闲断连问题。
+/// 每个实例对应一个邮箱账号，由调用方按空间账号临时构造。
 class MailService {
   MailService(this.config, this.password);
 
@@ -75,10 +76,13 @@ class MailService {
 
   /// 拉取最近邮件（信封 + 尽量带正文）。
   ///
-  /// [folder] 为空表示 INBOX。
+  /// [folder] 为空表示 INBOX；[accountId] 标记邮件来源账号；
+  /// [spaceAddresses] 为空间内全部账号地址，用于转发场景的原始收件识别。
   Future<List<EmailSummary>> fetchRecent({
     String folder = 'INBOX',
     int limit = 50,
+    String accountId = '',
+    Set<String> spaceAddresses = const {},
   }) async {
     final client = await _connect();
     try {
@@ -91,7 +95,9 @@ class MailService {
         count: limit,
         fetchPreference: mail.FetchPreference.fullWhenWithinSize,
       );
-      return messages.map((m) => _toSummary(m, folder)).toList();
+      return messages
+          .map((m) => _toSummary(m, folder, accountId, spaceAddresses))
+          .toList();
     } finally {
       await client.disconnect();
     }
@@ -112,7 +118,8 @@ class MailService {
     final results = <EmailSummary>[];
     for (final folder in {email.folder, 'INBOX', ..._sentCandidates()}) {
       try {
-        final list = await fetchRecent(folder: folder, limit: 80);
+        final list = await fetchRecent(
+            folder: folder, limit: 80, accountId: email.accountId);
         for (final m in list) {
           if (m.threadKey == email.threadKey && m.messageId != email.messageId) {
             results.add(m);
@@ -130,11 +137,15 @@ class MailService {
   List<String> _sentCandidates() => const ['Sent', 'Sent Messages', '已发送'];
 
   /// SMTP 发送纯文本回复（带 In-Reply-To 头，便于客户端线程归组）。
+  ///
+  /// [ccAddresses] 用于转发场景：抄送客户写信的原始收件地址
+  /// （如 support@g.com），保持客户视角线程一致。
   Future<void> sendReply({
     required String toAddress,
     required String subject,
     required String inReplyToMessageId,
     required String bodyText,
+    List<String> ccAddresses = const [],
   }) async {
     final client = await _connect();
     try {
@@ -149,6 +160,12 @@ class MailService {
         ..to = [mail.MailAddress(null, toAddress)]
         ..subject = replySubject
         ..text = bodyText;
+      if (ccAddresses.isNotEmpty) {
+        builder.cc = [
+          for (final a in ccAddresses)
+            if (a.trim().isNotEmpty) mail.MailAddress(null, a.trim()),
+        ];
+      }
       builder.addHeader('in-reply-to', inReplyToMessageId);
       builder.addHeader(
           'references', inReplyToMessageId); // 简化：指向来信即可归线程
@@ -159,7 +176,8 @@ class MailService {
     }
   }
 
-  EmailSummary _toSummary(mail.MimeMessage m, String folder) {
+  EmailSummary _toSummary(mail.MimeMessage m, String folder, String accountId,
+      Set<String> spaceAddresses) {
     final messageId = m.getHeaderValue('message-id') ??
         '<synthetic-$folder-${m.uid ?? m.guid ?? m.sequenceId ?? m.hashCode}>';
     final inReplyTo = m.getHeaderValue('in-reply-to');
@@ -171,20 +189,28 @@ class MailService {
         .toList();
     final date = m.decodeDate() ?? m.envelope?.date ?? DateTime.now();
     final body = _extractBody(m);
+    final toAddresses = (m.to ?? [])
+        .map((a) => a.email)
+        .whereType<String>()
+        .toList();
+    final ccAddresses = (m.cc ?? [])
+        .map((a) => a.email)
+        .whereType<String>()
+        .toList();
     return EmailSummary(
       messageId: messageId,
       subject: m.decodeSubject() ?? '（无主题）',
       fromAddress: m.from?.first.email ?? m.envelope?.from?.first.email ?? '',
-      toAddresses: (m.to ?? [])
-          .map((a) => a.email)
-          .whereType<String>()
-          .toList(),
+      toAddresses: toAddresses,
       date: date.toIso8601String(),
       folder: folder,
       bodyText: body,
       snippet: _snippet(body),
       inReplyTo: (inReplyTo != null && inReplyTo.isNotEmpty) ? inReplyTo : null,
       referencesIds: referencesIds,
+      accountId: accountId,
+      originalRecipients:
+          detectForwardedRecipients([...toAddresses, ...ccAddresses], spaceAddresses),
     );
   }
 

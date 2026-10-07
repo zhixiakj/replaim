@@ -14,6 +14,7 @@ class ConsumedEmail {
     required this.folder,
     required this.learnedAt,
     required this.generatedRuleIds,
+    this.accountId = '',
   });
 
   /// 邮件 Message-ID 头（含尖括号），全局唯一。
@@ -24,6 +25,9 @@ class ConsumedEmail {
   final String subject;
   final String from;
   final String folder;
+
+  /// 学习时来源的账号 ID（记录归属，去重仍按 messageId）。
+  final String accountId;
 
   /// 被学习处理的时间。
   final String learnedAt;
@@ -39,6 +43,7 @@ class ConsumedEmail {
         'folder': folder,
         'learned_at': learnedAt,
         'generated_rule_ids': generatedRuleIds,
+        'account_id': accountId,
       };
 
   static ConsumedEmail fromMap(Map<dynamic, dynamic> map) => ConsumedEmail(
@@ -51,6 +56,7 @@ class ConsumedEmail {
         generatedRuleIds: (map['generated_rule_ids'] as List? ?? [])
             .map((e) => e.toString())
             .toList(),
+        accountId: map['account_id'] as String? ?? '',
       );
 }
 

@@ -6,6 +6,7 @@ import '../../providers/app_providers.dart';
 import '../drafts/draft_edit_page.dart';
 
 /// 收件箱：左列表右详情（桌面双栏）。
+/// 汇总当前空间内全部收信账号的邮件，按时间倒序合并展示。
 class InboxPage extends ConsumerStatefulWidget {
   const InboxPage({super.key});
 
@@ -67,7 +68,7 @@ class _InboxPageState extends ConsumerState<InboxPage> {
                 ),
               Expanded(
                 child: state.messages.isEmpty && !state.loading
-                    ? const Center(child: Text('暂无邮件，请先配置邮箱并刷新'))
+                    ? const Center(child: Text('暂无邮件，请先在空间中配置账号并刷新'))
                     : ListView.builder(
                         itemCount: state.messages.length,
                         itemBuilder: (context, i) {
@@ -96,7 +97,7 @@ class _InboxPageState extends ConsumerState<InboxPage> {
   }
 }
 
-class _MailTile extends StatelessWidget {
+class _MailTile extends ConsumerWidget {
   const _MailTile({required this.email, required this.selected, this.onTap});
 
   final EmailSummary email;
@@ -104,26 +105,48 @@ class _MailTile extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final date = email.parsedDate;
     final dateText = date == null
         ? ''
         : '${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')} '
             '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+    final accountEmail =
+        ref.watch(currentSpaceProvider).space?.accountById(email.accountId)?.email ??
+            '';
+    final forwarded = email.originalRecipients.isNotEmpty;
     return ListTile(
       selected: selected,
       onTap: onTap,
-      title: Text(
-        email.subject,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontWeight: FontWeight.w600),
+      title: Row(
+        children: [
+          if (forwarded)
+            Tooltip(
+              message: '转发邮件：原始收件 ${email.originalRecipients.join('、')}',
+              child: Icon(Icons.forward_to_inbox,
+                  size: 16, color: Colors.orange.shade800),
+            ),
+          if (forwarded) const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              email.subject,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
       ),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(email.fromAddress,
-              maxLines: 1, overflow: TextOverflow.ellipsis),
+          Text(
+            accountEmail.isEmpty
+                ? email.fromAddress
+                : '[$accountEmail] ${email.fromAddress}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
           Text(email.snippet,
               maxLines: 1, overflow: TextOverflow.ellipsis),
         ],
@@ -144,6 +167,9 @@ class _MailDetail extends ConsumerWidget {
     final inbox = ref.watch(inboxProvider);
     final drafts = ref.watch(draftsProvider);
     final generating = drafts.generating;
+    final accountEmail =
+        ref.watch(currentSpaceProvider).space?.accountById(email.accountId)?.email ??
+            '';
 
     return ListView(
       padding: const EdgeInsets.all(24),
@@ -169,7 +195,35 @@ class _MailDetail extends ConsumerWidget {
           ],
         ),
         const SizedBox(height: 8),
-        Text('发件人：${email.fromAddress}　·　${email.date}'),
+        Text(
+          '发件人：${email.fromAddress}　·　${email.date}'
+          '${accountEmail.isEmpty ? "" : "　·　收信账号：$accountEmail"}',
+        ),
+        if (email.originalRecipients.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Card(
+            color: Colors.orange.shade50,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.forward_to_inbox,
+                      size: 18, color: Colors.orange.shade800),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '检测到转发：客户原始收件地址为 ${email.originalRecipients.join('、')}，'
+                      '（不在本空间账号内）。生成草稿时会默认通过 $accountEmail 发送并抄送上述地址，'
+                      '可在草稿页调整。',
+                      style: const TextStyle(height: 1.5),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
         if (inbox.threadPeers.isNotEmpty) ...[
           const SizedBox(height: 16),
           Text('本线程往来（${inbox.threadPeers.length} 封）',

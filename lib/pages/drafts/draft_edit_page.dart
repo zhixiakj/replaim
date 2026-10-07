@@ -16,6 +16,7 @@ class DraftEditPage extends ConsumerStatefulWidget {
 
 class _DraftEditPageState extends ConsumerState<DraftEditPage> {
   late final TextEditingController _editor;
+  final TextEditingController _ccInput = TextEditingController();
   bool _sending = false;
   DraftRecord? _record;
   bool _loaded = false;
@@ -30,6 +31,7 @@ class _DraftEditPageState extends ConsumerState<DraftEditPage> {
   @override
   void dispose() {
     _editor.dispose();
+    _ccInput.dispose();
     super.dispose();
   }
 
@@ -59,6 +61,9 @@ class _DraftEditPageState extends ConsumerState<DraftEditPage> {
         rules.where((r) => record.usedRuleIds.contains(r.id)).toList();
     final sent = record.status == DraftStatus.sentEdited ||
         record.status == DraftStatus.sentUnmodified;
+    final space = ref.watch(currentSpaceProvider).space;
+    final sender = space?.resolveSender(record.accountId);
+    final editable = !sent && record.status != DraftStatus.discarded;
 
     return Scaffold(
       appBar: AppBar(
@@ -87,10 +92,15 @@ class _DraftEditPageState extends ConsumerState<DraftEditPage> {
       body: ListView(
         padding: const EdgeInsets.all(24),
         children: [
-          Text('收件人：${record.toAddress}',
-              style: Theme.of(context).textTheme.bodyMedium),
-          Text('生成模型：${record.llmGeneratedBy}',
-              style: Theme.of(context).textTheme.bodySmall),
+        Text('收件人：${record.toAddress}',
+            style: Theme.of(context).textTheme.bodyMedium),
+        Text(
+          '发信账号：${sender?.email ?? "（空间内无可用发信账号）"}'
+          '${sender != null && sender.id != record.accountId ? "（收信账号未开发信，使用默认发信账号）" : ""}',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        Text('生成模型：${record.llmGeneratedBy}',
+            style: Theme.of(context).textTheme.bodySmall),
           const SizedBox(height: 4),
           Text(
             sent
@@ -106,7 +116,7 @@ class _DraftEditPageState extends ConsumerState<DraftEditPage> {
             child: TextField(
               controller: _editor,
               maxLines: 18,
-              enabled: !sent && record.status != DraftStatus.discarded,
+              enabled: editable,
               style: const TextStyle(height: 1.6),
               decoration: const InputDecoration(
                 border: OutlineInputBorder(),
@@ -114,6 +124,45 @@ class _DraftEditPageState extends ConsumerState<DraftEditPage> {
               ),
             ),
           ),
+          if (editable) ...[
+            const SizedBox(height: 12),
+            Text('抄送（转发场景自动识别的原始收件地址，可增删）',
+                style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                for (final cc in record.extraCc)
+                  InputChip(
+                    label: Text(cc),
+                    onDeleted: () =>
+                        setState(() => record.extraCc.remove(cc)),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _ccInput,
+                    decoration: const InputDecoration(
+                      hintText: '添加抄送地址',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    onSubmitted: (_) => _addCc(record),
+                  ),
+                ),
+                IconButton(
+                  tooltip: '添加',
+                  icon: const Icon(Icons.add),
+                  onPressed: () => _addCc(record),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 20),
           ExpansionTile(
             title: Text('本草稿依据的回复规则（${usedRules.length} 条）'),
@@ -155,6 +204,16 @@ class _DraftEditPageState extends ConsumerState<DraftEditPage> {
     );
   }
 
+  void _addCc(DraftRecord record) {
+    final v = _ccInput.text.trim().toLowerCase();
+    if (v.isEmpty || record.extraCc.contains(v)) {
+      _ccInput.clear();
+      return;
+    }
+    setState(() => record.extraCc.add(v));
+    _ccInput.clear();
+  }
+
   Future<void> _send() async {
     final record = _record;
     if (record == null) return;
@@ -162,11 +221,15 @@ class _DraftEditPageState extends ConsumerState<DraftEditPage> {
     if (text.isEmpty) return;
 
     // 二次确认：外发动作。
+    final ccNote = record.extraCc.isEmpty
+        ? ''
+        : '\n抄送：${record.extraCc.join('、')}';
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('确认发送'),
-        content: Text('将发送到 ${record.toAddress}\n主题：Re: ${record.subject}'),
+        content: Text(
+            '将发送到 ${record.toAddress}$ccNote\n主题：Re: ${record.subject}'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),

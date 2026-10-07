@@ -8,13 +8,13 @@ import '../models/kb_doc.dart';
 import 'paths.dart';
 import 'yaml_io.dart';
 
-/// 知识库服务：导入文档（复制进应用管理的目录）、hash 变更检测、读取内容。
+/// 知识库服务：空间内导入文档（复制进应用管理的目录）、hash 变更检测、读取内容。
 ///
 /// 首版支持 .md / .txt（UTF-8）。
 class KbService {
-  KbService({Directory? dir, File? indexFile})
-      : _dir = dir ?? Directory(AppPaths.instance.kbDir),
-        _indexFile = indexFile ?? File(AppPaths.instance.kbIndexFile);
+  KbService({String spaceId = '', Directory? dir, File? indexFile})
+      : _dir = dir ?? AppPaths.instance.kbDirFor(spaceId),
+        _indexFile = indexFile ?? AppPaths.instance.kbIndexFileFor(spaceId);
 
   final Directory _dir;
   final File _indexFile;

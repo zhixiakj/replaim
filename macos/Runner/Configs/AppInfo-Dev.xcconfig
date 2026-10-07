@@ -1,0 +1,6 @@
+// Dev 构建专用（--flavor dev）：独立 bundle id 与产品名，
+// 与正式版 App、数据目录、构建产物完全隔离，可并存运行。
+#include "AppInfo.xcconfig"
+
+PRODUCT_NAME = Replaim Dev
+PRODUCT_BUNDLE_IDENTIFIER = com.replaim.replaim.dev

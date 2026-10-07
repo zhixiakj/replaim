@@ -12,6 +12,8 @@ class EmailSummary {
     this.snippet = '',
     this.inReplyTo,
     this.referencesIds = const [],
+    this.accountId = '',
+    this.originalRecipients = const [],
   });
 
   /// Message-ID 头（含尖括号）。极少数邮件缺失时以合成值兜底。
@@ -36,6 +38,13 @@ class EmailSummary {
 
   /// References 头解析出的 Message-ID 链。
   final List<String> referencesIds;
+
+  /// 收信账号 ID（空间内哪个账号的邮箱收到这封邮件）。
+  final String accountId;
+
+  /// 转发场景检测出的原始收件地址（To/Cc 中不属于空间账号的地址），
+  /// 回信时需要抄送，保持客户视角线程一致。
+  final List<String> originalRecipients;
 
   DateTime? get parsedDate => DateTime.tryParse(date);
 

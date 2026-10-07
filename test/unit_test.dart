@@ -103,13 +103,13 @@ void main() {
 
   group('RuleStore', () {
     test('增删改 + 版本历史 round-trip', () async {
-      final store = RuleStore(File('${tmp.path}/rules.yaml'));
+      final store = RuleStore(file: File('${tmp.path}/rules.yaml'));
       final rule = await store.addManualRule('测试规则内容', RuleCategory.tone);
       await store.updateContent(rule.id, '更新后的内容', reason: '反馈学习');
       await store.updateContent(rule.id, '再更新一次', reason: '第二次反馈');
 
       // 重新加载模拟重启。
-      final store2 = RuleStore(File('${tmp.path}/rules.yaml'));
+      final store2 = RuleStore(file: File('${tmp.path}/rules.yaml'));
       await store2.load();
       final loaded = store2.findById(rule.id)!;
       expect(loaded.content, '再更新一次');
@@ -121,12 +121,12 @@ void main() {
     });
 
     test('supersede 停用旧规则并保留指向', () async {
-      final store = RuleStore(File('${tmp.path}/rules.yaml'));
+      final store = RuleStore(file: File('${tmp.path}/rules.yaml'));
       final old = await store.addManualRule('旧口径', RuleCategory.policy);
       final neu = await store.addManualRule('新口径', RuleCategory.policy);
       await store.supersede(old.id, neu.id);
 
-      final store2 = RuleStore(File('${tmp.path}/rules.yaml'));
+      final store2 = RuleStore(file: File('${tmp.path}/rules.yaml'));
       await store2.load();
       expect(store2.findById(old.id)!.enabled, isFalse);
       expect(store2.findById(old.id)!.supersededBy, neu.id);
@@ -134,7 +134,7 @@ void main() {
     });
 
     test('来源明细（邮件 Message-ID、知识库 hash）完整保存', () async {
-      final store = RuleStore(File('${tmp.path}/rules.yaml'));
+      final store = RuleStore(file: File('${tmp.path}/rules.yaml'));
       final rule = newRuleFromGeneration(
         type: RuleSourceType.emailHistory,
         generatedBy: 'test-model @ https://x/v1',
@@ -146,7 +146,7 @@ void main() {
         category: RuleCategory.policy,
       );
       await store.add(rule);
-      final store2 = RuleStore(File('${tmp.path}/rules.yaml'));
+      final store2 = RuleStore(file: File('${tmp.path}/rules.yaml'));
       await store2.load();
       final loaded = store2.rules.first;
       expect(loaded.source.details['message_ids'], ['<a@b>', '<c@d>']);
@@ -154,7 +154,7 @@ void main() {
     });
 
     test('deleteByKbDoc 只删对应文档规则', () async {
-      final store = RuleStore(File('${tmp.path}/rules.yaml'));
+      final store = RuleStore(file: File('${tmp.path}/rules.yaml'));
       await store.add(newRuleFromGeneration(
         type: RuleSourceType.knowledgeBase,
         generatedBy: 'm',
@@ -172,7 +172,7 @@ void main() {
       await store.addManualRule('手动规则', RuleCategory.other);
       await store.deleteByKbDoc('policy.md');
 
-      final store2 = RuleStore(File('${tmp.path}/rules.yaml'));
+      final store2 = RuleStore(file: File('${tmp.path}/rules.yaml'));
       await store2.load();
       expect(store2.rules.length, 2);
       expect(store2.rules.any((r) =>
@@ -181,11 +181,11 @@ void main() {
     });
 
     test('stats 累加', () async {
-      final store = RuleStore(File('${tmp.path}/rules.yaml'));
+      final store = RuleStore(file: File('${tmp.path}/rules.yaml'));
       final rule = await store.addManualRule('统计', RuleCategory.other);
       await store.markStats([rule.id], used: true, keptUnchanged: true);
       await store.markStats([rule.id], used: true);
-      final store2 = RuleStore(File('${tmp.path}/rules.yaml'));
+      final store2 = RuleStore(file: File('${tmp.path}/rules.yaml'));
       await store2.load();
       expect(store2.rules.first.stats.usedCount, 2);
       expect(store2.rules.first.stats.keptUnchangedCount, 1);
@@ -194,7 +194,7 @@ void main() {
 
   group('LearnStateStore', () {
     test('消费记录 round-trip + hasConsumed', () async {
-      final store = LearnStateStore(File('${tmp.path}/learn.yaml'));
+      final store = LearnStateStore(file: File('${tmp.path}/learn.yaml'));
       await store.recordRun([
         ConsumedEmail(
           messageId: '<1@x>',
@@ -206,7 +206,7 @@ void main() {
           generatedRuleIds: ['rule_1', 'rule_2'],
         ),
       ]);
-      final store2 = LearnStateStore(File('${tmp.path}/learn.yaml'));
+      final store2 = LearnStateStore(file: File('${tmp.path}/learn.yaml'));
       await store2.load();
       expect(store2.state.hasConsumed('<1@x>'), isTrue);
       expect(store2.state.hasConsumed('<2@x>'), isFalse);
@@ -217,7 +217,7 @@ void main() {
 
   group('DraftStore', () {
     test('保存/列出/查找进行中草稿', () async {
-      final store = DraftStore(Directory('${tmp.path}/drafts'));
+      final store = DraftStore(dir: Directory('${tmp.path}/drafts'));
       final id = store.newId();
       await store.save(DraftRecord(
         id: id,

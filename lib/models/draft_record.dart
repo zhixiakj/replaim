@@ -70,7 +70,9 @@ class DraftRecord {
     this.ruleUpdates = const [],
     this.sentAt,
     this.llmGeneratedBy = '',
-  });
+    this.accountId = '',
+    List<String>? extraCc,
+  }) : extraCc = extraCc ?? [];
 
   final String id;
 
@@ -108,6 +110,12 @@ class DraftRecord {
   /// 生成草稿的模型标识。
   final String llmGeneratedBy;
 
+  /// 收信账号 ID（哪个账号收到这封来信，发信时优先用它回信）。
+  final String accountId;
+
+  /// 回信时需要抄送的地址（通常是转发场景的原始收件地址），发送前可编辑。
+  List<String> extraCc;
+
   Map<String, dynamic> toMap() => {
         'id': id,
         'email_message_id': emailMessageId,
@@ -124,6 +132,8 @@ class DraftRecord {
         'rule_updates': ruleUpdates.map((e) => e.toMap()).toList(),
         'sent_at': sentAt?.toIso8601String(),
         'llm_generated_by': llmGeneratedBy,
+        'account_id': accountId,
+        'extra_cc': extraCc,
       };
 
   static DraftRecord fromMap(Map<dynamic, dynamic> map) => DraftRecord(
@@ -146,5 +156,9 @@ class DraftRecord {
             .toList(),
         sentAt: DateTime.tryParse(map['sent_at'] as String? ?? ''),
         llmGeneratedBy: map['llm_generated_by'] as String? ?? '',
+        accountId: map['account_id'] as String? ?? '',
+        extraCc: (map['extra_cc'] as List? ?? [])
+            .map((e) => e.toString())
+            .toList(),
       );
 }
