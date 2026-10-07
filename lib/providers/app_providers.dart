@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/app_config.dart';
@@ -43,15 +46,31 @@ class SecretsState {
 class SecretsController extends Notifier<SecretsState> {
   late final SecretStore _store = SecretStore();
 
+  /// 钥匙串加载完成的等待点；build 重建时换新，_bootstrap 完成各自持有的实例。
+  Completer<void> _ready = Completer<void>();
+
+  /// 收信 / 学习等入口在读取密码前先等待，避免冷启动拿到空表。
+  Future<void> get ready => _ready.future;
+
   @override
   SecretsState build() {
+    _ready = Completer<void>();
     _bootstrap();
     return const SecretsState();
   }
 
   Future<void> _bootstrap() async {
-    final (mail, llm) = await _store.loadAll();
-    _set(SecretsState(mailPasswords: mail, llmApiKeys: llm, loaded: true));
+    final ready = _ready;
+    try {
+      final (mail, llm) = await _store.loadAll();
+      _set(SecretsState(mailPasswords: mail, llmApiKeys: llm, loaded: true));
+    } catch (e) {
+      // 钥匙串读取失败：按空表降级并置 loaded，调用方不至于永久等待。
+      debugPrint('读取钥匙串失败（按空密码处理）：$e');
+      _set(const SecretsState(loaded: true));
+    } finally {
+      ready.complete();
+    }
   }
 
   Future<void> saveMailPassword(String accountId, String value) async {
@@ -447,10 +466,12 @@ class LearnController extends Notifier<LearnRunState> {
           error: '请先在「空间」页创建空间并配置邮箱账号'));
       return;
     }
+    // 冷启动竞态防护：等钥匙串密码读入内存，再筛选可用账号。
+    await ref.read(secretsProvider.notifier).ready;
     final secrets = ref.read(secretsProvider);
     final usable = <MailAccountConfig>[];
     for (final a in space.accounts) {
-      if (MailService(a, secrets.mailPasswords[a.id]).isConfigured) {
+      if (MailService(a, secrets.mailPasswords[a.id]).isReceiveReady) {
         usable.add(a);
       }
     }
@@ -720,6 +741,8 @@ class InboxController extends Notifier<InboxState> {
       _set(const InboxState(error: '当前空间没有开启收信的账号'));
       return;
     }
+    // 冷启动竞态防护：等钥匙串密码读入内存，再判断配置完整性。
+    await ref.read(secretsProvider.notifier).ready;
     final secrets = ref.read(secretsProvider);
     _set(InboxState(messages: state.messages, loading: true));
     final addresses = space.accountAddresses;
@@ -727,8 +750,8 @@ class InboxController extends Notifier<InboxState> {
     final errors = <String>[];
     for (final account in receivers) {
       final mail = MailService(account, secrets.mailPasswords[account.id]);
-      if (!mail.isConfigured) {
-        errors.add('${account.email}：配置不完整（缺服务器或密码）');
+      if (!mail.isReceiveReady) {
+        errors.add('${account.email}：配置不完整（缺 IMAP 服务器或密码）');
         continue;
       }
       try {
@@ -902,7 +925,7 @@ class DraftsController extends Notifier<DraftsState> {
       return false;
     }
     final sender = space.resolveSender(record.accountId);
-    if (sender == null || !sender.isConfigured) {
+    if (sender == null || !sender.isSendConfigured) {
       state = _copy(error: '当前空间没有可用于发信的账号（请在空间管理中开启账号的发信能力）');
       return false;
     }

@@ -83,7 +83,8 @@ void main() {
       expect(a.id, '');
       expect(a.receiveEnabled, isTrue);
       expect(a.sendEnabled, isTrue);
-      expect(a.isConfigured, isTrue);
+      expect(a.isReceiveConfigured, isTrue);
+      expect(a.isSendConfigured, isTrue);
     });
 
     test('receiveAccounts / sendAccounts / accountAddresses', () {

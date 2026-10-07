@@ -58,7 +58,7 @@ class SpaceMigrator {
 
     // 2. 邮箱账号 → 空间首个账号（收 + 发全开）。
     final oldMail = MailAccountConfig.fromMap(cfg['mail'] ?? {});
-    if (oldMail.email.isNotEmpty || oldMail.isConfigured) {
+    if (oldMail.email.isNotEmpty) {
       final account = oldMail.copyWith(
         id: newAccountId(),
         receiveEnabled: true,

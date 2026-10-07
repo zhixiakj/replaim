@@ -154,8 +154,13 @@ class MailAccountConfig {
   /// 是否可用于发信（SMTP）。
   final bool sendEnabled;
 
-  bool get isConfigured =>
-      email.isNotEmpty && imapHost.isNotEmpty && smtpHost.isNotEmpty;
+  /// 收信配置是否完整（密码另存于安全存储，由 MailService 层校验）。
+  bool get isReceiveConfigured =>
+      email.isNotEmpty && imapHost.isNotEmpty;
+
+  /// 发信配置是否完整（密码另存于安全存储，由 MailService 层校验）。
+  bool get isSendConfigured =>
+      email.isNotEmpty && smtpHost.isNotEmpty;
 
   Map<String, dynamic> toMap() => {
         'id': id,

@@ -16,7 +16,11 @@ class MailService {
   final MailAccountConfig config;
   final String? password;
 
-  bool get isConfigured => config.isConfigured && (password?.isNotEmpty ?? false);
+  bool get isReceiveReady =>
+      config.isReceiveConfigured && (password?.isNotEmpty ?? false);
+
+  bool get isSendReady =>
+      config.isSendConfigured && (password?.isNotEmpty ?? false);
 
   mail.MailAccount _buildAccount() => mail.MailAccount.fromManualSettings(
         name: config.displayName.isEmpty ? config.email : config.displayName,
@@ -25,7 +29,10 @@ class MailService {
         incomingHost: config.imapHost,
         incomingPort: config.imapPort,
         incomingSocketType: config.imapSecure ? SocketType.ssl : SocketType.plain,
-        outgoingHost: config.smtpHost,
+        // 纯收信账号 SMTP 可留空；enough_mail 要求非空，占位即可
+        // （SMTP 懒连接，发信前另有 isSendReady 校验拦截）。
+        outgoingHost:
+            config.smtpHost.isEmpty ? 'smtp.unset.invalid' : config.smtpHost,
         outgoingPort: config.smtpPort,
         outgoingSocketType: _smtpSocketType(),
         password: password ?? '',
@@ -38,21 +45,21 @@ class MailService {
   }
 
   Future<mail.MailClient> _connect({Duration timeout = const Duration(seconds: 20)}) async {
-    if (!isConfigured) {
-      throw MailException('邮箱账号未配置完整（地址/服务器/密码）');
+    if (!isReceiveReady) {
+      throw MailException('邮箱账号收信配置不完整（地址/IMAP 服务器/密码）');
     }
     final client = mail.MailClient(_buildAccount(), isLogEnabled: false);
     await client.connect(timeout: timeout);
     return client;
   }
 
-  /// 测试 IMAP + SMTP 连通性，返回错误信息（null = 成功）。
+  /// 测试 IMAP 连通性，返回错误信息（null = 成功）。
   Future<String?> testConnection() async {
     mail.MailClient? client;
     try {
       client = await _connect(timeout: const Duration(seconds: 15));
       await client.listMailboxes();
-      // SMTP 在发送时才真正建连，这里只验证配置完整。
+      // SMTP 在发送时才真正建连，这里只验证收信配置。
       return null;
     } on mail.MailException catch (e) {
       return e.message ?? e.toString();
@@ -147,6 +154,9 @@ class MailService {
     required String bodyText,
     List<String> ccAddresses = const [],
   }) async {
+    if (!isSendReady) {
+      throw MailException('邮箱账号发信配置不完整（地址/SMTP 服务器/密码）');
+    }
     final client = await _connect();
     try {
       final replySubject =

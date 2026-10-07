@@ -321,42 +321,26 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
         // ---------------- 基本信息 ----------------
         _section(context, title: '基本信息', children: [
           _textField(_name, '空间名称'),
-          InputDecorator(
-            decoration: const InputDecoration(
-                labelText: '分配大模型（在设置页管理多个模型）',
-                border: OutlineInputBorder(),
-                isDense: true),
-            child: DropdownButton<String>(
-              value: _llmId,
-              isDense: true,
-              isExpanded: true,
-              underline: const SizedBox.shrink(),
-              items: [
-                const DropdownMenuItem(value: '', child: Text('未分配')),
-                for (final p in profiles)
-                  DropdownMenuItem(
-                      value: p.id, child: Text('${p.name}（${p.config.model}）')),
-              ],
-              onChanged: (v) => setState(() => _llmId = v ?? ''),
-            ),
+          _dropdown(
+            value: _llmId,
+            label: '分配大模型（在设置页管理多个模型）',
+            items: [
+              const DropdownMenuItem(value: '', child: Text('未分配')),
+              for (final p in profiles)
+                DropdownMenuItem(
+                    value: p.id, child: Text('${p.name}（${p.config.model}）')),
+            ],
+            onChanged: (v) => setState(() => _llmId = v ?? ''),
           ),
-          InputDecorator(
-            decoration: const InputDecoration(
-                labelText: '默认发信账号（收信账号未开发信时回落使用）',
-                border: OutlineInputBorder(),
-                isDense: true),
-            child: DropdownButton<String>(
-              value: _defaultSendId,
-              isDense: true,
-              isExpanded: true,
-              underline: const SizedBox.shrink(),
-              items: [
-                const DropdownMenuItem(value: '', child: Text('自动（任一可发信账号）')),
-                for (final a in space.sendAccounts)
-                  DropdownMenuItem(value: a.id, child: Text(a.email)),
-              ],
-              onChanged: (v) => setState(() => _defaultSendId = v ?? ''),
-            ),
+          _dropdown(
+            value: _defaultSendId,
+            label: '默认发信账号（收信账号未开发信时回落使用）',
+            items: [
+              const DropdownMenuItem(value: '', child: Text('自动（任一可发信账号）')),
+              for (final a in space.sendAccounts)
+                DropdownMenuItem(value: a.id, child: Text(a.email)),
+            ],
+            onChanged: (v) => setState(() => _defaultSendId = v ?? ''),
           ),
           _textField(_outputLanguage, '草稿输出语言（默认 English）'),
         ]),
@@ -421,7 +405,7 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
     String? password;
     for (final a in space.receiveAccounts) {
       final pwd = ref.read(secretsProvider).mailPasswords[a.id];
-      if (MailService(a, pwd).isConfigured) {
+      if (MailService(a, pwd).isReceiveReady) {
         account = a;
         password = pwd;
         break;
@@ -585,6 +569,27 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
             border: const OutlineInputBorder(),
             isDense: true,
           ),
+        ),
+      );
+
+  Widget _dropdown({
+    required String value,
+    required String label,
+    required List<DropdownMenuItem<String>> items,
+    required ValueChanged<String?> onChanged,
+  }) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: DropdownButtonFormField<String>(
+          initialValue: value,
+          isExpanded: true,
+          decoration: InputDecoration(
+            labelText: label,
+            border: const OutlineInputBorder(),
+            isDense: true,
+          ),
+          items: items,
+          onChanged: onChanged,
         ),
       );
 }
@@ -795,7 +800,8 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
                 dense: true,
               ),
               Row(children: [
-                Expanded(child: _field(_smtpHost, 'SMTP 服务器，如 smtp.qq.com')),
+                Expanded(
+                    child: _field(_smtpHost, 'SMTP 服务器，如 smtp.qq.com（只收信可留空）')),
                 const SizedBox(width: 12),
                 SizedBox(width: 120, child: _field(_smtpPort, '端口', num: true)),
               ]),
