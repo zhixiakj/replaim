@@ -71,7 +71,7 @@ class LlmClient {
       'model': config.model,
       'messages': messages.map((m) => m.toMap()).toList(),
       'temperature': temperature ?? config.temperature,
-      'max_tokens': ?maxTokens,
+      'max_tokens': maxTokens ?? config.maxTokens,
     };
     final data = await _post(body);
     final content = _firstChoice(data);
