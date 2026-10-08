@@ -237,6 +237,11 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
   String _llmId = '';
   String _defaultSendId = '';
 
+  /// 文本输入防抖自动保存（与草稿页同款 800ms）。
+  Timer? _saveDebounce;
+  bool _dirty = false;
+  bool _suppressAutoSave = false;
+
   @override
   void initState() {
     super.initState();
@@ -244,35 +249,63 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
     _outputLanguage = TextEditingController();
     _learnMonths = TextEditingController();
     _initFrom(widget.space);
+    // 初始装载完成后再挂监听，避免程序化赋值触发自动保存。
+    _name.addListener(_onTextFieldChanged);
+    _outputLanguage.addListener(_onTextFieldChanged);
+    _learnMonths.addListener(_onTextFieldChanged);
   }
 
   void _initFrom(MailSpace s) {
+    _suppressAutoSave = true;
     _name.text = s.name;
     _outputLanguage.text = s.outputLanguage;
     _learnMonths.text = '${s.learnMonths}';
     _llmId = s.llmProfileId ?? '';
     _defaultSendId = s.defaultSendAccountId ?? '';
+    _suppressAutoSave = false;
+  }
+
+  void _onTextFieldChanged() {
+    if (_suppressAutoSave) return;
+    _dirty = true;
+    _saveDebounce?.cancel();
+    _saveDebounce = Timer(const Duration(milliseconds: 800), () {
+      _dirty = false;
+      _persist(widget.space);
+    });
   }
 
   @override
   void didUpdateWidget(covariant _SpaceDetail oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // 切换编辑对象时重新装载；同一空间的编辑保存不回填（保留未保存输入）。
+    // 切换编辑对象时：先把旧空间可能还在防抖期内的输入落盘，再重新装载。
+    // 同一空间的保存导致 rebuild 不回填（不打断输入）。
     if (oldWidget.space.id != widget.space.id) {
+      _flushPending(oldWidget.space);
       _initFrom(widget.space);
     }
   }
 
   @override
   void dispose() {
+    _flushPending(widget.space);
     _name.dispose();
     _outputLanguage.dispose();
     _learnMonths.dispose();
     super.dispose();
   }
 
-  Future<void> _save() async {
-    final space = ref.read(spacesProvider).byId(widget.space.id);
+  /// 立即取消防抖并落盘未保存的文本输入（切换空间 / 离开页面时兜底）。
+  void _flushPending(MailSpace target) {
+    _saveDebounce?.cancel();
+    _saveDebounce = null;
+    if (!_dirty) return;
+    _dirty = false;
+    _persist(target);
+  }
+
+  Future<void> _persist(MailSpace target) async {
+    final space = ref.read(spacesProvider).byId(target.id);
     if (space == null) return;
     space
       ..name = _name.text.trim().isEmpty ? space.name : _name.text.trim()
@@ -284,10 +317,6 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
       ..llmProfileId = _llmId.isEmpty ? null : _llmId
       ..defaultSendAccountId = _defaultSendId.isEmpty ? null : _defaultSendId;
     await ref.read(spacesProvider.notifier).save(space);
-    if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('空间设置已保存')));
-    }
   }
 
   @override
@@ -336,7 +365,10 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
                     child: Text('${p.name}（${p.config.model}）'),
                   ),
               ],
-              onChanged: (v) => setState(() => _llmId = v ?? ''),
+              onChanged: (v) => setState(() {
+                _llmId = v ?? '';
+                _persist(widget.space);
+              }),
             ),
             _dropdown(
               value: _defaultSendId,
@@ -346,7 +378,10 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
                 for (final a in space.sendAccounts)
                   DropdownMenuItem(value: a.id, child: Text(a.email)),
               ],
-              onChanged: (v) => setState(() => _defaultSendId = v ?? ''),
+              onChanged: (v) => setState(() {
+                _defaultSendId = v ?? '';
+                _persist(widget.space);
+              }),
             ),
             _textField(_outputLanguage, '草稿输出语言（默认 English）'),
           ],
@@ -406,10 +441,11 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
         ),
 
         const SizedBox(height: 8),
-        FilledButton.icon(
-          onPressed: _save,
-          icon: const Icon(Icons.save),
-          label: const Text('保存空间设置'),
+        const Center(
+          child: Text(
+            '修改后自动保存',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
+          ),
         ),
         const SizedBox(height: 32),
       ],
