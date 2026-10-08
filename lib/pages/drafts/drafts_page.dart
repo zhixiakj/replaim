@@ -3,9 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/draft_record.dart';
 import '../../providers/app_providers.dart';
+import 'draft_actions.dart';
 import 'draft_edit_page.dart';
 
-/// 草稿箱：全部草稿记录（编辑中 / 已发送 / 已修改发送 / 已丢弃）。
+/// 草稿箱：全部草稿记录（编辑中 / 已发送 / 修改后发送 / 手工标注 / 已丢弃）。
 class DraftsPage extends ConsumerWidget {
   const DraftsPage({super.key});
 
@@ -19,7 +20,8 @@ class DraftsPage extends ConsumerWidget {
         Text('草稿箱', style: Theme.of(context).textTheme.headlineSmall),
         const SizedBox(height: 4),
         Text(
-          '发送时若草稿被修改，会自动分析修改并优化回复规则',
+          '发送时若草稿被修改，会自动分析修改并优化回复规则；'
+          '未发送的草稿不会计入后续草稿生成与学习',
           style: Theme.of(context).textTheme.bodySmall,
         ),
         if (state.message != null)
@@ -45,6 +47,11 @@ class _DraftTile extends ConsumerWidget {
 
   final DraftRecord record;
 
+  Future<void> _delete(BuildContext context, WidgetRef ref) async {
+    if (!await confirmDeleteDraft(context)) return;
+    await ref.read(draftsProvider.notifier).deleteDraft(record);
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final rules = ref.watch(rulesProvider).rules;
@@ -56,11 +63,21 @@ class _DraftTile extends ConsumerWidget {
         title: Text(record.subject, maxLines: 1, overflow: TextOverflow.ellipsis),
         subtitle: Text(
           '${record.toAddress} · ${record.createdAt.substring(0, 16)} · '
-          '依据 $usedCount 条规则 · ${record.wasModified && record.status == DraftStatus.sentEdited ? "已修改后发送" : ""}',
+              '依据 $usedCount 条规则',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        trailing: _statusChip(context, record.status),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _statusChip(context, record.status),
+            IconButton(
+              tooltip: '删除',
+              icon: const Icon(Icons.delete_outline, size: 20),
+              onPressed: () => _delete(context, ref),
+            ),
+          ],
+        ),
         onTap: () => Navigator.push(
           context,
           MaterialPageRoute(
@@ -76,6 +93,7 @@ class _DraftTile extends ConsumerWidget {
       DraftStatus.editing => (Colors.orange, '编辑中'),
       DraftStatus.sentUnmodified => (Colors.green, '已发送'),
       DraftStatus.sentEdited => (Colors.blue, '修改后发送'),
+      DraftStatus.sentManually => (Colors.teal, '手工标注已发送'),
       DraftStatus.discarded => (Colors.grey, '已丢弃'),
     };
     return Container(

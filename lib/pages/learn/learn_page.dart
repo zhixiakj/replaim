@@ -11,7 +11,10 @@ class LearnPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(learnProvider);
     final space = ref.watch(currentSpaceProvider).space;
-    final learnFolders = space?.learnFolders ?? const ['Sent'];
+    // 学习文件夹按账号配置（各服务商命名不同），展示用去重合集。
+    final learnFolders = <String>{
+      for (final a in space?.accounts ?? const []) ...a.learnFolders,
+    }.toList();
     final learnMonths = space?.learnMonths ?? 12;
     final notifier = ref.read(learnProvider.notifier);
     final consumed = notifier.learnState.consumed;
@@ -48,11 +51,12 @@ class LearnPage extends ConsumerWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          '从「${learnFolders.join('、')}」与收件箱近 $learnMonths 个月的历史中提炼回复规则：'
+          '从各账号「${learnFolders.join('、')}」与收件箱近 $learnMonths 个月的历史中提炼回复规则'
+          '（文件夹因服务商而异，按账号在「空间」页的邮箱账号中设置）：'
           '学习时自动把客户来信与你的回复按线程配对，从「问了什么 → 怎么答」中学习'
           '（空间内全部账号逐一学习）。'
           '已学习过的邮件不会重复使用；邮件按时间升序处理、冲突时新邮件优先，'
-          '保证旧邮件不会覆盖新邮件沉淀的规则。学习范围可在「空间」页调整。',
+          '保证旧邮件不会覆盖新邮件沉淀的规则。',
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 16),
@@ -113,9 +117,10 @@ class LearnPage extends ConsumerWidget {
                     ),
                   const SizedBox(height: 4),
                   const Text(
-                    '请在「空间」页 → 学习偏好 → 历史学习文件夹 中改用服务器实际存在的'
-                    '文件夹名，或点「从服务器读取文件夹列表」直接选择；常用已发送命名'
-                    '（Sent / Sent Messages / Sent Items / 已发送）会自动匹配。',
+                    '请在「空间」页 → 邮箱账号 → 编辑该账号 → 历史学习文件夹 中改用'
+                    '服务器实际存在的文件夹名，或点「从服务器读取文件夹列表」直接选择；'
+                    '常用已发送命名（Sent / Sent Messages / Sent Items / 已发送）'
+                    '会自动匹配，全部未命中时学习会按服务器 \\Sent 标记自动识别。',
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ],

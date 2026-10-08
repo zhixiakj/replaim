@@ -58,6 +58,7 @@ class SpaceMigrator {
 
     // 2. 邮箱账号 → 空间首个账号（收 + 发全开）。
     final oldMail = MailAccountConfig.fromMap(cfg['mail'] ?? {});
+    MailAccountConfig? migratedAccount;
     if (oldMail.email.isNotEmpty) {
       final account = oldMail.copyWith(
         id: newAccountId(),
@@ -65,6 +66,7 @@ class SpaceMigrator {
         sendEnabled: true,
       );
       space.accounts.add(account);
+      migratedAccount = account;
       final legacyPwd = await _secrets.legacyMailPassword();
       if (legacyPwd != null && legacyPwd.isNotEmpty) {
         await _secrets.saveMailPassword(account.id, legacyPwd);
@@ -83,15 +85,15 @@ class SpaceMigrator {
       space.llmProfileId = profile.id;
     }
 
-    // 4. 学习偏好 / 输出语言随空间。
+    // 4. 学习偏好 / 输出语言随空间；学习文件夹按账号配置，并入首个账号。
     space.outputLanguage = cfg['output_language'] as String? ?? 'English';
     final folders = (cfg['learn_folders'] as List?)
         ?.map((e) => e.toString())
         .toList();
-    if (folders != null && folders.isNotEmpty) {
-      space.learnFolders
-        ..clear()
-        ..addAll(folders);
+    if (folders != null && folders.isNotEmpty && migratedAccount != null) {
+      final i = space.accounts.indexOf(migratedAccount);
+      space.accounts[i] =
+          space.accounts[i].copyWith(learnFolders: folders);
     }
     space.learnMonths = cfg['learn_months'] as int? ?? 12;
     space.learnMaxPerFolder = cfg['learn_max_per_folder'] as int? ?? 200;

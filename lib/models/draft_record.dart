@@ -9,6 +9,9 @@ enum DraftStatus {
   /// 修改后发送（触发规则反馈学习）。
   sentEdited,
 
+  /// 用户在其他平台手工发送后主动标注（标注时可选触发规则反馈学习）。
+  sentManually,
+
   /// 已丢弃。
   discarded;
 
@@ -16,6 +19,7 @@ enum DraftStatus {
         DraftStatus.editing => '编辑中',
         DraftStatus.sentUnmodified => '已发送（未修改）',
         DraftStatus.sentEdited => '已发送（修改后）',
+        DraftStatus.sentManually => '已发送（手工标注）',
         DraftStatus.discarded => '已丢弃',
       };
 
@@ -52,6 +56,44 @@ class RuleUpdateRecord {
       );
 }
 
+/// 草稿页 AI 对话的一条消息（随草稿一起持久化）。
+class DraftChatMessage {
+  DraftChatMessage({
+    required this.role,
+    required this.text,
+    this.body,
+    required this.at,
+  });
+
+  /// user / assistant。
+  final String role;
+
+  /// user 轮：用户的修改指示；assistant 轮：一句话概括（或失败原因）。
+  final String text;
+
+  /// assistant 轮应用后的完整正文（失败轮为空）。
+  final String? body;
+
+  final String at;
+
+  bool get isUser => role == 'user';
+
+  Map<String, dynamic> toMap() => {
+        'role': role,
+        'text': text,
+        'body': body,
+        'at': at,
+      };
+
+  static DraftChatMessage fromMap(Map<dynamic, dynamic> map) =>
+      DraftChatMessage(
+        role: map['role'] as String? ?? 'assistant',
+        text: map['text'] as String? ?? '',
+        body: map['body'] as String?,
+        at: map['at'] as String? ?? '',
+      );
+}
+
 /// 草稿记录：从生成到发送的完整链路。
 class DraftRecord {
   DraftRecord({
@@ -64,6 +106,8 @@ class DraftRecord {
     required this.createdAt,
     required this.status,
     this.threadContextDigest = '',
+    this.currentText,
+    List<DraftChatMessage>? chatHistory,
     this.finalSentText,
     this.wasModified = false,
     this.diffSummary,
@@ -72,7 +116,8 @@ class DraftRecord {
     this.llmGeneratedBy = '',
     this.accountId = '',
     List<String>? extraCc,
-  }) : extraCc = extraCc ?? [];
+  })  : chatHistory = chatHistory ?? [],
+        extraCc = extraCc ?? [];
 
   final String id;
 
@@ -83,6 +128,18 @@ class DraftRecord {
 
   /// LLM 生成的原始草稿（未编辑）。
   final String originalDraft;
+
+  /// 当前编辑中的正文（手工编辑与 AI 改稿都写这里）；null 表示从未改过。
+  String? currentText;
+
+  /// 展示 / 发送 / 改稿时使用的正文：编辑过取编辑值，否则取原始草稿。
+  String get effectiveText {
+    final t = currentText;
+    return (t == null || t.trim().isEmpty) ? originalDraft : t;
+  }
+
+  /// AI 对话改稿记录（与草稿一一对应，跨页面保留）。
+  List<DraftChatMessage> chatHistory;
 
   /// 生成时注入的规则 ID 列表（用于反馈统计与追溯）。
   final List<String> usedRuleIds;
@@ -122,6 +179,8 @@ class DraftRecord {
         'subject': subject,
         'to_address': toAddress,
         'original_draft': originalDraft,
+        'current_text': currentText,
+        'chat_history': chatHistory.map((e) => e.toMap()).toList(),
         'used_rule_ids': usedRuleIds,
         'thread_context_digest': threadContextDigest,
         'created_at': createdAt,
@@ -142,6 +201,10 @@ class DraftRecord {
         subject: map['subject'] as String? ?? '',
         toAddress: map['to_address'] as String? ?? '',
         originalDraft: map['original_draft'] as String? ?? '',
+        currentText: map['current_text'] as String?,
+        chatHistory: (map['chat_history'] as List? ?? [])
+            .map((e) => DraftChatMessage.fromMap(e as Map))
+            .toList(),
         usedRuleIds: (map['used_rule_ids'] as List? ?? [])
             .map((e) => e.toString())
             .toList(),

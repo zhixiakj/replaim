@@ -32,6 +32,7 @@ void main() {
     bool receive = true,
     bool send = true,
     String? id,
+    List<String> learnFolders = const ['Sent'],
   }) =>
       MailAccountConfig(
         id: id ?? newAccountId(),
@@ -40,6 +41,7 @@ void main() {
         smtpHost: 'smtp.example.com',
         receiveEnabled: receive,
         sendEnabled: send,
+        learnFolders: learnFolders,
       );
 
   group('MailSpace 模型', () {
@@ -48,13 +50,15 @@ void main() {
         id: 'space_abc',
         name: '店铺 A',
         accounts: [
-          account('a@shop.com', id: 'acct_a'),
-          account('b@shop.com', receive: false, id: 'acct_b'),
+          account('a@shop.com', id: 'acct_a', learnFolders: ['Sent Messages']),
+          account('b@shop.com',
+              receive: false,
+              id: 'acct_b',
+              learnFolders: ['[Gmail]/Sent Mail', 'Archive']),
         ],
         llmProfileId: 'llm_1',
         defaultSendAccountId: 'acct_a',
         outputLanguage: 'Chinese',
-        learnFolders: ['Sent', 'Archive'],
         learnMonths: 6,
         learnMaxPerFolder: 100,
       );
@@ -65,12 +69,50 @@ void main() {
       expect(back.accounts[0].id, 'acct_a');
       expect(back.accounts[0].imapHost, 'imap.example.com');
       expect(back.accounts[1].receiveEnabled, isFalse);
+      // 学习文件夹按账号 round-trip（多账号各不相同）。
+      expect(back.accounts[0].learnFolders, ['Sent Messages']);
+      expect(back.accounts[1].learnFolders, ['[Gmail]/Sent Mail', 'Archive']);
       expect(back.llmProfileId, 'llm_1');
       expect(back.defaultSendAccountId, 'acct_a');
       expect(back.outputLanguage, 'Chinese');
-      expect(back.learnFolders, ['Sent', 'Archive']);
       expect(back.learnMonths, 6);
       expect(back.learnMaxPerFolder, 100);
+    });
+
+    test('账号 learnFolders 默认 Sent / copyWith 更新且不影响原实例', () {
+      final a = MailAccountConfig(email: 'a@x.com');
+      expect(a.learnFolders, ['Sent']);
+      final b = a.copyWith(learnFolders: ['Sent Messages']);
+      expect(b.learnFolders, ['Sent Messages']);
+      expect(a.learnFolders, ['Sent']);
+    });
+
+    test('旧空间级 learn_folders 继承进各账号（账号自身键优先）', () {
+      final s = MailSpace.fromMap({
+        'id': 's',
+        'name': 'n',
+        'learn_folders': ['Legacy Folder'],
+        'accounts': [
+          {'id': 'acct_a', 'email': 'a@x.com'},
+          {'id': 'acct_b', 'email': 'b@x.com', 'learn_folders': ['Sent Items']},
+        ],
+      });
+      expect(s.accounts[0].learnFolders, ['Legacy Folder']);
+      expect(s.accounts[1].learnFolders, ['Sent Items']);
+      // 新格式不再写空间级键，账号级键保留。
+      expect(s.toMap().containsKey('learn_folders'), isFalse);
+      expect(s.toMap()['accounts'][1]['learn_folders'], ['Sent Items']);
+    });
+
+    test('无任何 learn_folders 键 → 账号默认 Sent', () {
+      final s = MailSpace.fromMap({
+        'id': 's',
+        'name': 'n',
+        'accounts': [
+          {'id': 'acct_a', 'email': 'a@x.com'},
+        ],
+      });
+      expect(s.accounts.single.learnFolders, ['Sent']);
     });
 
     test('旧格式账号 map（无 id / 收发开关）默认收 + 发', () {
@@ -316,7 +358,7 @@ void main() {
           'timeout_seconds': 120,
         },
         'output_language': 'English',
-        'learn_folders': ['Sent'],
+        'learn_folders': ['Sent Messages'],
         'learn_months': 6,
         'learn_max_per_folder': 100,
       };
@@ -374,6 +416,8 @@ void main() {
       expect(space.accounts.single.receiveEnabled, isTrue);
       expect(space.accounts.single.sendEnabled, isTrue);
       expect(space.accounts.single.id, isNotEmpty);
+      // 学习文件夹并入首个账号（现按账号配置）。
+      expect(space.accounts.single.learnFolders, ['Sent Messages']);
       expect(space.learnMonths, 6);
       expect(space.learnMaxPerFolder, 100);
       expect(space.outputLanguage, 'English');

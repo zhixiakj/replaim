@@ -18,6 +18,7 @@ import '../services/kb_service.dart';
 import '../services/llm_client.dart';
 import '../services/llm_profile_store.dart';
 import '../services/mail_service.dart';
+import '../services/prompts.dart' as prompts;
 import '../services/rule_generators.dart';
 import '../services/rule_store.dart';
 import '../services/secret_storage.dart';
@@ -459,6 +460,25 @@ class LearnController extends Notifier<LearnRunState> {
 
   LearnState get learnState => _store.state;
 
+  /// \Sent 兜底：账号全部学习文件夹未命中时，用 IMAP 特殊标记识别真实
+  /// 已发送文件夹并回写账号配置（自愈，下次直达）。识别不到或回写失败
+  /// 返回 null，由调用方保留原失败记录。
+  Future<String?> _recoverSentFolder(
+      MailService mail, MailAccountConfig account, MailSpace space) async {
+    try {
+      final detected = await mail.detectSentFolder();
+      if (detected == null) return null;
+      final fresh = ref.read(spacesProvider).byId(space.id);
+      final i = fresh?.accounts.indexWhere((a) => a.id == account.id) ?? -1;
+      if (fresh == null || i < 0) return detected;
+      fresh.accounts[i] = fresh.accounts[i].copyWith(learnFolders: [detected]);
+      await ref.read(spacesProvider.notifier).save(fresh);
+      return detected;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 执行一次增量学习：只处理「未消费过 + 时间范围内」的邮件。
   /// 空间内多个账号逐一拉取历史；单账号失败不中断整体。
   Future<void> runLearning() async {
@@ -506,12 +526,16 @@ class LearnController extends Notifier<LearnRunState> {
       final since =
           DateTime.now().subtract(Duration(days: 30 * space.learnMonths));
       final all = <EmailSummary>[];
+      final recoveredNotes = <String>[];
       for (final account in usable) {
         final mail = MailService(account, secrets.mailPasswords[account.id]);
-        // 发件侧（learnFolders）：既是学习材料，也是来信配对的锚点
-        //（含已消费的发件——配对只认引用关系，与是否学过无关）。
+        // 发件侧（账号级 learnFolders，文件夹名因服务商而异）：既是学习
+        // 材料，也是来信配对的锚点（含已消费的发件——配对只认引用关系，
+        // 与是否学过无关）。
         final accountSent = <EmailSummary>[];
-        for (final folder in space.learnFolders) {
+        final accountFailed = <String>[];
+        final accountFailedDetails = <String>[];
+        for (final folder in account.learnFolders) {
           _set(LearnRunState(
               running: true,
               progress:
@@ -525,10 +549,38 @@ class LearnController extends Notifier<LearnRunState> {
                 accountId: account.id);
             accountSent.addAll(list);
           } catch (e) {
-            failed.add('${account.email}/$folder');
-            failedDetails.add('${account.email} / $folder：$e');
+            accountFailed.add('${account.email}/$folder');
+            accountFailedDetails.add('${account.email} / $folder：$e');
           }
         }
+        // 配置的文件夹全部未命中时，用 IMAP \Sent 特殊标记自动识别真实
+        // 已发送文件夹兜底拉取；成功则回写账号配置（自愈，下次直达）。
+        if (accountFailed.isNotEmpty &&
+            accountFailed.length == account.learnFolders.length) {
+          final detected = await _recoverSentFolder(mail, account, space);
+          if (detected != null) {
+            _set(LearnRunState(
+                running: true,
+                progress: '正在拉取 ${account.email} 的 $detected（自动识别）…',
+                consumedCount: learnState.consumed.length,
+                lastRunAt: learnState.lastRunAt));
+            try {
+              accountSent.addAll(await mail.fetchRecent(
+                  folder: detected,
+                  limit: space.learnMaxPerFolder,
+                  accountId: account.id));
+              recoveredNotes.add('${account.email}：学习文件夹自动识别为'
+                  '「$detected」并已更新配置');
+              accountFailed.clear();
+              accountFailedDetails.clear();
+            } catch (e) {
+              accountFailed.add('${account.email}/$detected');
+              accountFailedDetails.add('${account.email} / $detected：$e');
+            }
+          }
+        }
+        failed.addAll(accountFailed);
+        failedDetails.addAll(accountFailedDetails);
         // 收件侧：拉收件箱，只保留与发件同线程的来信（问→答配对学习）。
         _set(LearnRunState(
             running: true,
@@ -555,9 +607,28 @@ class LearnController extends Notifier<LearnRunState> {
             e.messageId.isNotEmpty &&
             seen.add(e.messageId)));
       }
+      // 手工标注已发送的草稿并入学习：用户在其他平台发送，不会出现在
+      // IMAP Sent，直接转伪 Sent 邮件参与学习（与来信靠 inReplyTo 配对）。
+      // 应用内发送的草稿已 appendToSent 写入 Sent，拉取即可学到，不重复并入。
+      // messageId 用 draft:<id> 前缀，learnState 按它去重防重复学习。
+      final manualSentDrafts = (await DraftStore(spaceId: space.id).listAll())
+          .where((d) =>
+              d.status == DraftStatus.sentManually &&
+              (d.finalSentText ?? '').trim().isNotEmpty &&
+              (d.sentAt ?? DateTime(2000)).isAfter(since) &&
+              !learnState.hasConsumed('draft:${d.id}'))
+          .toList();
+      for (final d in manualSentDrafts) {
+        final pseudo = draftAsSentEmail(
+            d, space.resolveSender(d.accountId)?.email ?? '');
+        if (pseudo != null) all.add(pseudo);
+      }
+
       final failedNote = failed.isEmpty
           ? ''
           : '；${failed.length} 个账号/文件夹拉取失败（详见下方警告）';
+      final recoveredNote =
+          recoveredNotes.isEmpty ? '' : '；${recoveredNotes.join('；')}';
 
       if (all.isEmpty) {
         _set(LearnRunState(
@@ -565,7 +636,7 @@ class LearnController extends Notifier<LearnRunState> {
             lastRunAt: learnState.lastRunAt,
             failedFolders: failedDetails,
             resultMessage:
-                '没有新的可学习邮件（均已消费过或超出时间范围）$failedNote'));
+                '没有新的可学习邮件（均已消费过或超出时间范围）$failedNote$recoveredNote'));
         return;
       }
 
@@ -582,7 +653,10 @@ class LearnController extends Notifier<LearnRunState> {
         };
       final result = await generator.generateFromEmails(
         all,
-        folders: [...space.learnFolders, 'INBOX'],
+        folders: [
+          ...{for (final a in usable) ...a.learnFolders},
+          'INBOX',
+        ],
         spaceAddresses: space.accountAddresses,
       );
 
@@ -609,7 +683,7 @@ class LearnController extends Notifier<LearnRunState> {
         failedFolders: failedDetails,
         resultMessage: '学习完成：新增 ${result.addedRules.length} 条规则，'
             '更新 ${result.updatedRuleIds.toSet().length} 条，消费 ${consumed.length} 封邮件'
-            '$failedNote',
+            '$failedNote$recoveredNote',
       ));
     } catch (e) {
       _set(LearnRunState(
@@ -1153,6 +1227,17 @@ class DraftsController extends Notifier<DraftsState> {
       for (final c in inbox.conversations) {
         if (c.messages.any((m) => m.messageId == email.messageId)) {
           peers.addAll(c.messages.where((m) => m.messageId != email.messageId));
+          // 已发送（含手工标注）的草稿也计入线程上下文——补上刚发送
+          // 尚未同步、以及手工发送不会出现在 IMAP Sent 的情况；
+          // 未发送的草稿不参与，避免把没发出的内容当作用户口径。
+          peers.addAll(sentDraftsAsThreadPeers(
+            drafts: await _store.listAll(),
+            conversationMessageIds:
+                c.messages.map((m) => m.messageId).toSet(),
+            conversationMessages: c.messages,
+            resolveSender: (accountId) =>
+                space.resolveSender(accountId)?.email ?? '',
+          ));
           break;
         }
       }
@@ -1220,7 +1305,28 @@ class DraftsController extends Notifier<DraftsState> {
     }
 
     // 判断是否修改 + 反馈学习。
-    var feedbackMessage = '';
+    final feedbackMessage =
+        '已发送。${await _runFeedbackLearning(record, finalText)}';
+    record
+      ..sentAt = DateTime.now()
+      ..status = record.wasModified
+          ? DraftStatus.sentEdited
+          : DraftStatus.sentUnmodified;
+    await _store.save(record);
+    await ref.read(rulesProvider.notifier).reload();
+    state = DraftsState(feedbackMessage: feedbackMessage);
+    await reload();
+    // 尽快把刚发出的 Sent 邮件同步进会话视图（替换草稿过渡气泡）。
+    unawaited(ref.read(inboxProvider.notifier).refresh());
+    return true;
+  }
+
+  /// 规则反馈学习（发送与手工标注共用）：对比原始草稿与实际文本，
+  /// 写回 record 的 finalSentText / wasModified / diffSummary / ruleUpdates。
+  ///
+  /// 返回学习结果描述（不含「已发送。」前缀，由调用方拼接）。
+  Future<String> _runFeedbackLearning(
+      DraftRecord record, String finalText) async {
     final llm = ref.read(llmClientProvider);
     final modified =
         !FeedbackLearner.isUnmodified(record.originalDraft, finalText);
@@ -1234,43 +1340,104 @@ class DraftsController extends Notifier<DraftsState> {
           ..finalSentText = finalText
           ..wasModified = result.wasModified
           ..diffSummary = result.diffSummary
-          ..ruleUpdates = result.ruleUpdates
-          ..sentAt = DateTime.now()
-          ..status = result.wasModified
-              ? DraftStatus.sentEdited
-              : DraftStatus.sentUnmodified;
-        feedbackMessage = result.wasModified
-            ? '已发送。检测到修改，规则库已优化：${result.ruleUpdates.isEmpty ? "本次无需调整" : result.ruleUpdates.map((u) => "[${u.action}] ${u.summary}").join("；")}'
-            : '已发送。草稿未被修改，相关规则获得正反馈';
+          ..ruleUpdates = result.ruleUpdates;
+        return result.wasModified
+            ? '检测到修改，规则库已优化：${result.ruleUpdates.isEmpty ? "本次无需调整" : result.ruleUpdates.map((u) => "[${u.action}] ${u.summary}").join("；")}'
+            : '草稿未被修改，相关规则获得正反馈';
       } catch (e) {
         record
           ..finalSentText = finalText
-          ..wasModified = modified
-          ..sentAt = DateTime.now()
-          ..status =
-              modified ? DraftStatus.sentEdited : DraftStatus.sentUnmodified;
-        feedbackMessage = '已发送。但规则反馈学习失败：$e';
+          ..wasModified = modified;
+        return '但规则反馈学习失败：$e';
       }
-    } else {
-      record
-        ..finalSentText = finalText
-        ..wasModified = modified
-        ..sentAt = DateTime.now()
-        ..status =
-            modified ? DraftStatus.sentEdited : DraftStatus.sentUnmodified;
-      feedbackMessage = '已发送（未配置大模型，跳过规则反馈学习）';
     }
-    await _store.save(record);
-    await ref.read(rulesProvider.notifier).reload();
-    state = DraftsState(feedbackMessage: feedbackMessage);
-    await reload();
-    return true;
+    record
+      ..finalSentText = finalText
+      ..wasModified = modified;
+    return '（未配置大模型，跳过规则反馈学习）';
   }
 
   Future<void> discard(DraftRecord record) async {
     record.status = DraftStatus.discarded;
     await _store.save(record);
     await reload();
+  }
+
+  /// 持久化编辑中的正文（手工编辑与 AI 改稿共用，UI 防抖调用）。
+  Future<void> saveCurrentText(DraftRecord record, String text) async {
+    if (record.status != DraftStatus.editing) return;
+    record.currentText = text;
+    await _store.save(record);
+  }
+
+  /// 删除草稿（真删文件；区别于 discard 只置状态）。
+  Future<void> deleteDraft(DraftRecord record) async {
+    await _store.delete(record.id);
+    await reload();
+  }
+
+  /// 手工标注已发送：用户在其他平台发送了草稿内容。
+  ///
+  /// [runFeedback] 为 true 时对比原始草稿与当前文本做规则反馈学习
+  /// （若用户在外部又改动过内容，差异会失真，由 UI 提示用户自行取舍）。
+  Future<bool> markManuallySent(DraftRecord record,
+      {required bool runFeedback}) async {
+    final finalText = record.effectiveText;
+    var feedbackMessage = '已标注为手工发送。该内容会计入后续草稿生成与学习的参考。';
+    if (runFeedback) {
+      feedbackMessage =
+          '已标注为手工发送。${await _runFeedbackLearning(record, finalText)}';
+    } else {
+      record.finalSentText = finalText;
+    }
+    record
+      ..sentAt = DateTime.now()
+      ..status = DraftStatus.sentManually;
+    await _store.save(record);
+    state = DraftsState(feedbackMessage: feedbackMessage);
+    await reload();
+    return true;
+  }
+
+  /// AI 对话改稿：按 [instruction] 修改当前正文。
+  ///
+  /// 成功后把对话（用户指示 + AI 概括与应用后正文）追加进 record.chatHistory
+  /// 并持久化，同时 currentText 更新为返回的 body；失败抛异常、不落盘。
+  Future<({String brief, String body})> refineDraft(
+      DraftRecord record, String instruction) async {
+    final llm = ref.read(llmClientProvider);
+    if (llm == null) {
+      throw StateError('请先在设置中配置大模型，并在空间中分配');
+    }
+    final space = ref.read(currentSpaceProvider).space;
+    final historyText = record.chatHistory
+        .map((m) => '${m.isUser ? "用户" : "AI"}：${m.text}')
+        .join('\n');
+    final raw = await llm.chatJson([
+      LlmMessage.user(prompts.refineDraftPrompt(
+        currentDraft: record.effectiveText,
+        historyText: historyText,
+        instruction: instruction,
+        language: space?.outputLanguage ?? '英文',
+      )),
+    ], temperature: 0.3);
+    final map =
+        raw is Map ? Map<String, dynamic>.from(raw) : const <String, dynamic>{};
+    final brief = (map['brief'] as String?)?.trim() ?? '已按指示修改草稿';
+    final body = (map['body'] as String?)?.trim() ?? '';
+    if (body.isEmpty) {
+      throw const FormatException('模型未返回修改后的正文');
+    }
+    final now = DateTime.now().toIso8601String();
+    record
+      ..currentText = body
+      ..chatHistory.addAll([
+        DraftChatMessage(role: 'user', text: instruction, at: now),
+        DraftChatMessage(role: 'assistant', text: brief, body: body, at: now),
+      ]);
+    await _store.save(record);
+    await reload();
+    return (brief: brief, body: body);
   }
 
   DraftsState _copy({bool? generating, String? error, String? message}) =>

@@ -10,12 +10,10 @@ class MailSpace {
     this.llmProfileId,
     this.defaultSendAccountId,
     this.outputLanguage = 'English',
-    List<String> learnFolders = const ['Sent'],
     this.learnMonths = 12,
     this.learnMaxPerFolder = 200,
     DateTime? createdAt,
   })  : accounts = List.of(accounts),
-        learnFolders = List.of(learnFolders),
         createdAt = createdAt ?? DateTime.now();
 
   final String id;
@@ -32,9 +30,6 @@ class MailSpace {
 
   /// 草稿输出语言（收件人看到的语言）。
   String outputLanguage;
-
-  /// 历史邮件学习时要读取的文件夹名（IMAP），默认已发送。
-  final List<String> learnFolders;
 
   /// 学习时间范围（近 N 个月）。
   int learnMonths;
@@ -86,29 +81,32 @@ class MailSpace {
         'llm_profile_id': llmProfileId,
         'default_send_account_id': defaultSendAccountId,
         'output_language': outputLanguage,
-        'learn_folders': learnFolders,
         'learn_months': learnMonths,
         'learn_max_per_folder': learnMaxPerFolder,
         'created_at': createdAt.toIso8601String(),
       };
 
-  static MailSpace fromMap(Map<dynamic, dynamic> map) => MailSpace(
-        id: map['id'] as String? ?? '',
-        name: map['name'] as String? ?? '未命名空间',
-        accounts: (map['accounts'] as List? ?? [])
-            .map((e) => MailAccountConfig.fromMap(e as Map))
-            .toList(),
-        llmProfileId: map['llm_profile_id'] as String?,
-        defaultSendAccountId: map['default_send_account_id'] as String?,
-        outputLanguage: map['output_language'] as String? ?? 'English',
-        learnFolders: (map['learn_folders'] as List?)
-                ?.map((e) => e.toString())
-                .toList() ??
-            const ['Sent'],
-        learnMonths: map['learn_months'] as int? ?? 12,
-        learnMaxPerFolder: map['learn_max_per_folder'] as int? ?? 200,
-        createdAt: DateTime.tryParse(map['created_at'] as String? ?? ''),
-      );
+  /// 旧版把历史学习文件夹放在空间级（learn_folders 键）；现改为按账号配置，
+  /// 读取时把旧空间级值继承给每个账号（账号自身键优先），实现一次性迁移：
+  /// 老数据首次打开即生效，保存后空间级旧键自然消失。
+  static MailSpace fromMap(Map<dynamic, dynamic> map) {
+    final legacyLearnFolders =
+        (map['learn_folders'] as List?)?.map((e) => e.toString()).toList();
+    return MailSpace(
+      id: map['id'] as String? ?? '',
+      name: map['name'] as String? ?? '未命名空间',
+      accounts: (map['accounts'] as List? ?? [])
+          .map((e) => MailAccountConfig.fromMap(e as Map,
+              fallbackLearnFolders: legacyLearnFolders))
+          .toList(),
+      llmProfileId: map['llm_profile_id'] as String?,
+      defaultSendAccountId: map['default_send_account_id'] as String?,
+      outputLanguage: map['output_language'] as String? ?? 'English',
+      learnMonths: map['learn_months'] as int? ?? 12,
+      learnMaxPerFolder: map['learn_max_per_folder'] as int? ?? 200,
+      createdAt: DateTime.tryParse(map['created_at'] as String? ?? ''),
+    );
+  }
 }
 
 /// 邮箱账号（IMAP 收 + SMTP 发），归属某个空间。
@@ -125,6 +123,7 @@ class MailAccountConfig {
     this.smtpSecure = true,
     this.receiveEnabled = true,
     this.sendEnabled = true,
+    this.learnFolders = const ['Sent'],
   });
 
   /// 账号 ID（acct_ 前缀），密码等敏感信息以此作为命名空间键。
@@ -154,6 +153,12 @@ class MailAccountConfig {
   /// 是否可用于发信（SMTP）。
   final bool sendEnabled;
 
+  /// 该账号历史学习要读取的文件夹名（IMAP），因邮箱服务商而异：
+  /// Gmail 为 [Gmail]/Sent Mail（中文账号为 [Gmail]/已发送邮件），
+  /// QQ/163 为 Sent Messages，Outlook 为 Sent。默认 ['Sent']，
+  /// 实际解析见 MailService.matchMailboxName 的三轮匹配。
+  final List<String> learnFolders;
+
   /// 收信配置是否完整（密码另存于安全存储，由 MailService 层校验）。
   bool get isReceiveConfigured =>
       email.isNotEmpty && imapHost.isNotEmpty;
@@ -174,9 +179,11 @@ class MailAccountConfig {
         'smtp_secure': smtpSecure,
         'receive_enabled': receiveEnabled,
         'send_enabled': sendEnabled,
+        'learn_folders': learnFolders,
       };
 
-  static MailAccountConfig fromMap(Map<dynamic, dynamic> map) =>
+  static MailAccountConfig fromMap(Map<dynamic, dynamic> map,
+          {List<String>? fallbackLearnFolders}) =>
       MailAccountConfig(
         id: map['id'] as String? ?? '',
         email: map['email'] as String? ?? '',
@@ -189,6 +196,11 @@ class MailAccountConfig {
         smtpSecure: map['smtp_secure'] as bool? ?? true,
         receiveEnabled: map['receive_enabled'] as bool? ?? true,
         sendEnabled: map['send_enabled'] as bool? ?? true,
+        learnFolders: (map['learn_folders'] as List?)
+                ?.map((e) => e.toString())
+                .toList() ??
+            fallbackLearnFolders ??
+            const ['Sent'],
       );
 
   MailAccountConfig copyWith({
@@ -203,6 +215,7 @@ class MailAccountConfig {
     bool? smtpSecure,
     bool? receiveEnabled,
     bool? sendEnabled,
+    List<String>? learnFolders,
   }) =>
       MailAccountConfig(
         id: id ?? this.id,
@@ -216,6 +229,7 @@ class MailAccountConfig {
         smtpSecure: smtpSecure ?? this.smtpSecure,
         receiveEnabled: receiveEnabled ?? this.receiveEnabled,
         sendEnabled: sendEnabled ?? this.sendEnabled,
+        learnFolders: learnFolders ?? this.learnFolders,
       );
 }
 

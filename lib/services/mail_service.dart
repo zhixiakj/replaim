@@ -82,6 +82,38 @@ class MailService {
     }
   }
 
+  /// 从服务器 LIST 结果中找带 `\Sent` 特殊标记（RFC 6154）的文件夹：
+  /// 服务商直接告知哪个是已发送，文件夹名随界面语言本地化也不怕
+  ///（如中文 Gmail 的 `[Gmail]/已发送邮件`）。未标注或不存在返回 null。
+  Future<String?> detectSentFolder() async {
+    final client = await _connect();
+    try {
+      final boxes = await client.listMailboxes();
+      for (final b in boxes) {
+        if (b.isSent) return b.name;
+      }
+      return null;
+    } finally {
+      await client.disconnect();
+    }
+  }
+
+  /// 一次 LIST 同时返回全部文件夹名与 `\Sent` 标记的已发送文件夹名
+  ///（供选择器标注推荐项，避免选择器连两次服务器）。
+  Future<(List<String>, String?)> listFoldersWithSentFlag() async {
+    final client = await _connect();
+    try {
+      final boxes = await client.listMailboxes();
+      String? sent;
+      for (final b in boxes) {
+        if (sent == null && b.isSent) sent = b.name;
+      }
+      return (boxes.map((b) => b.name).toList()..sort(), sent);
+    } finally {
+      await client.disconnect();
+    }
+  }
+
   /// 拉取最近邮件（信封 + 尽量带正文）。
   ///
   /// [folder] 为空表示 INBOX；[accountId] 标记邮件来源账号；
@@ -409,6 +441,7 @@ String _leafFolderName(String name) {
 }
 
 /// 「已发送」文件夹在各家服务商下的常见名字（归一化后）。
+/// '已发送邮件' 是中文界面 Gmail 的叶子名（`[Gmail]/已发送邮件`）。
 const Set<String> _sentFolderAliases = {
   'sent',
   'sent messages',
@@ -416,6 +449,7 @@ const Set<String> _sentFolderAliases = {
   'sent mail',
   '已发送',
   '已发邮件',
+  '已发送邮件',
 };
 
 /// 从 Authentication-Results 头解析 spf=pass 的发信域名（Gmail 的 mailed-by）。

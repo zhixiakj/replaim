@@ -158,3 +158,31 @@ String threadDigestPrompt(String threadText) => '''
 不要任何多余解释：
 
 $threadText''';
+
+/// 8. AI 对话改稿：按用户指示输出修改后的完整草稿正文。
+///
+/// [historyText] 是此前几轮「用户指示 → AI 概括」的对话记录（可为空），
+/// 让模型理解累积的修改意图。
+String refineDraftPrompt({
+  required String currentDraft,
+  required String historyText,
+  required String instruction,
+  required String language,
+}) => '''
+你是邮件草稿修改助手。用户会给出对当前草稿的修改指示，请输出修改后的完整邮件正文。
+
+铁律：
+1. 只按用户指示及其直接含义修改，不要自行补充原草稿中没有的信息、政策或承诺；
+2. 未被指示修改的部分保持原样；
+3. 正文语言保持与当前草稿一致（$language）；
+4. body 必须是完整的邮件正文（含称呼与落款），不是片段或差异说明。
+
+输出 JSON 对象，不要输出其他文字：
+{"brief": "一句话中文说明本次改了什么", "body": "修改后的完整正文"}
+
+${historyText.isEmpty ? '' : '此前的修改对话（供理解意图，正文以当前草稿为准）：\n$historyText\n'}
+当前草稿：
+$currentDraft
+
+用户本轮指示：
+$instruction''';

@@ -78,7 +78,10 @@ class EmailSummary {
   }
 
   /// 归一化主题：去掉 Re:/Fw: 前缀与空格，小写。
-  String get normalizedSubject =>
+  String get normalizedSubject => normalizeSubject(subject);
+
+  /// 供草稿记录等非邮件对象复用的主题归一化。
+  static String normalizeSubject(String subject) =>
       subject.replaceAll(RegExp(r'^\s*((re|fw|fwd|答复|转发)(\[\d+\])?:\s*)+',
               caseSensitive: false),
           '').replaceAll(RegExp(r'\s+'), ' ').trim().toLowerCase();

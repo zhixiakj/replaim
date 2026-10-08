@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/mail_space.dart';
 import '../../providers/app_providers.dart';
 import '../../services/id_gen.dart';
+import '../../services/mail_provider_presets.dart';
 import '../../services/mail_service.dart';
 
 /// 空间管理：空间列表 + 空间详情（账号 / LLM 分配 / 默认发信账号 / 学习偏好）。
@@ -224,22 +227,15 @@ class _SpaceDetail extends ConsumerStatefulWidget {
 class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
   late final TextEditingController _name;
   late final TextEditingController _outputLanguage;
-  late final TextEditingController _learnFolders;
   late final TextEditingController _learnMonths;
   String _llmId = '';
   String _defaultSendId = '';
-
-  /// 学习文件夹名校验结果（保存后异步核对，只提示不阻塞）。
-  List<String> _folderWarnings = const [];
-  String? _folderCheckNote;
-  bool _folderChecking = false;
 
   @override
   void initState() {
     super.initState();
     _name = TextEditingController();
     _outputLanguage = TextEditingController();
-    _learnFolders = TextEditingController();
     _learnMonths = TextEditingController();
     _initFrom(widget.space);
   }
@@ -247,13 +243,9 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
   void _initFrom(MailSpace s) {
     _name.text = s.name;
     _outputLanguage.text = s.outputLanguage;
-    _learnFolders.text = s.learnFolders.join(', ');
     _learnMonths.text = '${s.learnMonths}';
     _llmId = s.llmProfileId ?? '';
     _defaultSendId = s.defaultSendAccountId ?? '';
-    _folderWarnings = const [];
-    _folderCheckNote = null;
-    _folderChecking = false;
   }
 
   @override
@@ -269,7 +261,6 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
   void dispose() {
     _name.dispose();
     _outputLanguage.dispose();
-    _learnFolders.dispose();
     _learnMonths.dispose();
     super.dispose();
   }
@@ -284,21 +275,11 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
       ..learnMonths = int.tryParse(_learnMonths.text.trim()) ?? space.learnMonths
       ..llmProfileId = _llmId.isEmpty ? null : _llmId
       ..defaultSendAccountId = _defaultSendId.isEmpty ? null : _defaultSendId;
-    final folders = _learnFolders.text
-        .split(',')
-        .map((s) => s.trim())
-        .where((s) => s.isNotEmpty)
-        .toList();
-    space.learnFolders
-      ..clear()
-      ..addAll(folders.isEmpty ? ['Sent'] : folders);
     await ref.read(spacesProvider.notifier).save(space);
     if (mounted) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('空间设置已保存')));
     }
-    // 保存后异步核对学习文件夹名（不阻塞，结果内联展示）。
-    _validateLearnFolders(space);
   }
 
   @override
@@ -357,47 +338,15 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
 
         // ---------------- 学习偏好 ----------------
         _section(context, title: '学习偏好（按空间）', children: [
-          _textField(_learnFolders, '历史学习文件夹（逗号分隔，默认 Sent）', helper:
-              '已发送的常见命名（Sent / Sent Messages / Sent Items / 已发送）会自动匹配；'
-              'Gmail 实际为 [Gmail]/Sent Mail，不确定时可点击下方按钮从服务器选取'),
           _textField(_learnMonths, '学习时间范围（近 N 个月）', num: true),
-          if (_folderChecking)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text('正在连接服务器核对学习文件夹名…',
-                  style: const TextStyle(fontSize: 12, color: Colors.grey)),
-            ),
-          if (_folderWarnings.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (final w in _folderWarnings)
-                    Text(w,
-                        style: TextStyle(
-                            fontSize: 12, color: Colors.orange.shade900)),
-                ],
-              ),
-            ),
-          if (!_folderChecking && _folderCheckNote != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text(
-                _folderCheckNote!,
-                style: TextStyle(
-                    fontSize: 12,
-                    color: _folderCheckNote!.contains('✓')
-                        ? Colors.green
-                        : Colors.grey),
-              ),
-            ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              icon: const Icon(Icons.folder_open),
-              label: const Text('从服务器读取文件夹列表'),
-              onPressed: () => _pickFolders(space),
+          const Padding(
+            padding: EdgeInsets.only(bottom: 4),
+            child: Text(
+              '历史学习文件夹按邮箱账号单独设置（文件夹名因服务商而异：Gmail 为 '
+              '[Gmail]/Sent Mail（中文账号为 [Gmail]/已发送邮件）、QQ/163 为 '
+              'Sent Messages、Outlook 为 Sent）。请在下方「邮箱账号」中编辑各账号'
+              '填写；常见命名会自动匹配，全部未命中时学习会按服务器标记自动识别。',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ),
         ]),
@@ -440,116 +389,6 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
         const SizedBox(height: 32),
       ],
     );
-  }
-
-  /// 保存后异步核对学习文件夹名：对每个配置完整的收信账号 LIST 文件夹，
-  /// 用 matchMailboxName 校验；连不上的账号跳过。只提示、不阻塞保存。
-  Future<void> _validateLearnFolders(MailSpace space) async {
-    if (space.learnFolders.isEmpty) return;
-    final folders = space.learnFolders;
-    final secrets = ref.read(secretsProvider);
-    setState(() => _folderChecking = true);
-    final warnings = <String>[];
-    var checkedAny = false;
-    for (final a in space.receiveAccounts) {
-      final svc = MailService(a, secrets.mailPasswords[a.id]);
-      if (!svc.isReceiveReady) continue;
-      final List<String> serverFolders;
-      try {
-        serverFolders = await svc.listFolders();
-      } catch (_) {
-        continue; // 单账号连不上则跳过，不算校验失败。
-      }
-      checkedAny = true;
-      for (final f in folders) {
-        if (matchMailboxName(serverFolders, f) == null) {
-          final preview = serverFolders.take(8).join('、');
-          warnings.add('${a.email}：「$f」在服务器上不存在'
-              '（现有：$preview'
-              '${serverFolders.length > 8 ? ' 等共 ${serverFolders.length} 个' : ''}）');
-        }
-      }
-    }
-    if (!mounted) return;
-    setState(() {
-      _folderChecking = false;
-      _folderWarnings = warnings;
-      _folderCheckNote = warnings.isEmpty
-          ? (checkedAny ? '✓ 文件夹名已与服务器核对无误' : '（未能连接服务器核对文件夹名）')
-          : null;
-    });
-  }
-
-  Future<void> _pickFolders(MailSpace space) async {
-    // 用第一个配置完整的收信账号读取文件夹列表。
-    MailAccountConfig? account;
-    String? password;
-    for (final a in space.receiveAccounts) {
-      final pwd = ref.read(secretsProvider).mailPasswords[a.id];
-      if (MailService(a, pwd).isReceiveReady) {
-        account = a;
-        password = pwd;
-        break;
-      }
-    }
-    if (account == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('请先添加一个配置完整的收信账号')));
-      return;
-    }
-    try {
-      final folders = await MailService(account, password).listFolders();
-      if (!mounted) return;
-      final current = _learnFolders.text
-          .split(',')
-          .map((e) => e.trim())
-          .where((e) => e.isNotEmpty)
-          .toSet();
-      await showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('选择学习文件夹'),
-          content: SizedBox(
-            width: 380,
-            height: 360,
-            child: ListView(
-              children: [
-                for (final f in folders)
-                  ListTile(
-                    title: Text(f),
-                    dense: true,
-                    trailing: current.contains(f)
-                        ? const Icon(Icons.check, size: 18)
-                        : null,
-                    onTap: () {
-                      setState(() {
-                        if (current.contains(f)) {
-                          current.remove(f);
-                        } else {
-                          current.add(f);
-                        }
-                        _learnFolders.text = current.join(', ');
-                      });
-                      Navigator.pop(context);
-                    },
-                  ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('完成'),
-            ),
-          ],
-        ),
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('读取文件夹失败：$e')));
-      }
-    }
   }
 
   Future<void> _editAccount(MailAccountConfig? existing) async {
@@ -721,6 +560,8 @@ class _AccountTile extends StatelessWidget {
             _badge(context, account.sendEnabled ? '发信' : '不发信',
                 account.sendEnabled ? Colors.blue : Colors.grey),
             if (isDefaultSender) _badge(context, '默认发信', Colors.deepOrange),
+            _badge(context, '学习 ${account.learnFolders.join('、')}',
+                Colors.deepPurple),
           ],
         ),
       ),
@@ -778,6 +619,7 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
   late final TextEditingController _smtpHost;
   late final TextEditingController _smtpPort;
   late final TextEditingController _password;
+  late final TextEditingController _learnFolders;
 
   bool _imapSecure = true;
   bool _smtpSecure = true;
@@ -785,6 +627,11 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
   bool _sendEnabled = true;
   bool _testing = false;
   String? _testResult;
+
+  /// 服务器地址 / 学习文件夹是否被用户手动改过；未改过时允许按邮箱
+  /// 域名自动套用服务商预设（编辑已有账号时视为已手动定制，不覆盖）。
+  bool _hostsTouched = false;
+  bool _foldersTouched = false;
 
   /// 已存密码的占位掩码（配合 obscureText 显示为一排圆点）。
   static const _pwdMask = '••••••••';
@@ -809,6 +656,7 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
     _smtpHost = TextEditingController(text: m?.smtpHost ?? '');
     _smtpPort = TextEditingController(text: '${m?.smtpPort ?? 465}');
     _password = TextEditingController();
+    _learnFolders = TextEditingController(text: m?.learnFolders.join(', ') ?? '');
     if (m != null &&
         (ref.read(secretsProvider).mailPasswords[m.id] ?? '').isNotEmpty) {
       _password.text = _pwdMask;
@@ -817,18 +665,50 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
     _smtpSecure = m?.smtpSecure ?? true;
     _receiveEnabled = m?.receiveEnabled ?? true;
     _sendEnabled = m?.sendEnabled ?? true;
+    _hostsTouched = m != null;
+    _foldersTouched = m != null;
+    // 新建账号时：输入到完整邮箱地址即自动套用服务商预设。
+    _email.addListener(_applyPreset);
   }
 
   @override
   void dispose() {
+    _email.removeListener(_applyPreset);
     for (final c in [
       _email, _displayName, _imapHost, _imapPort, _smtpHost, _smtpPort,
-      _password,
+      _password, _learnFolders,
     ]) {
       c.dispose();
     }
     super.dispose();
   }
+
+  /// 邮箱地址命中服务商预设时，自动填充服务器地址/端口/加密与预置的
+  /// 已发送文件夹名（只填未被手动改过的字段）。
+  void _applyPreset() {
+    final preset = mailProviderPresetFor(_email.text);
+    if (preset == null) return;
+    if (!_hostsTouched) {
+      _imapHost.text = preset.imapHost;
+      _imapPort.text = '${preset.imapPort}';
+      _smtpHost.text = preset.smtpHost;
+      _smtpPort.text = '${preset.smtpPort}';
+      setState(() {
+        _imapSecure = preset.imapSecure;
+        _smtpSecure = preset.smtpSecure;
+      });
+    }
+    if (!_foldersTouched) {
+      _learnFolders.text = preset.sentFolders.join(', ');
+    }
+  }
+
+  /// 逗号分隔输入解析为文件夹名列表（去空白，忽略空段）。
+  List<String> _parseFolders() => _learnFolders.text
+      .split(',')
+      .map((s) => s.trim())
+      .where((s) => s.isNotEmpty)
+      .toList();
 
   MailAccountConfig _buildFromForm() => (widget.existing ??
           MailAccountConfig(id: newAccountId()))
@@ -843,6 +723,7 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
     smtpSecure: _smtpSecure,
     receiveEnabled: _receiveEnabled,
     sendEnabled: _sendEnabled,
+    learnFolders: _parseFolders().isEmpty ? const ['Sent'] : _parseFolders(),
   );
 
   Future<void> _save() async {
@@ -852,8 +733,38 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
       return;
     }
     final account = _buildFromForm();
+    final password = _effectivePassword ??
+        ref.read(secretsProvider).mailPasswords[account.id];
+    // 对话框即将关闭：先取根级 messenger 与密码，保存后再异步核对。
+    final messenger = ScaffoldMessenger.of(context);
     Navigator.pop(context);
     await widget.onSaved(account, _effectivePassword);
+    unawaited(_validateFolders(messenger, account, password));
+  }
+
+  /// 保存后异步核对学习文件夹名：LIST 服务器文件夹，用 matchMailboxName
+  /// 校验；连不上则跳过（「测试连接」里也会核对）。只提示、不阻塞。
+  /// [password] 必须在对话框关闭前取好（销毁后不能再读 ref/controller）。
+  Future<void> _validateFolders(ScaffoldMessengerState messenger,
+      MailAccountConfig account, String? password) async {
+    final svc = MailService(account, password);
+    if (!svc.isReceiveReady) return;
+    try {
+      final serverFolders = await svc.listFolders();
+      final missing = [
+        for (final f in account.learnFolders)
+          if (matchMailboxName(serverFolders, f) == null) f,
+      ];
+      if (missing.isEmpty) return;
+      final preview = serverFolders.take(8).join('、');
+      messenger.showSnackBar(SnackBar(content: Text(
+          '${account.email}：学习文件夹「${missing.join('、')}」在服务器上不存在'
+          '（现有：$preview'
+          '${serverFolders.length > 8 ? ' 等共 ${serverFolders.length} 个' : ''}），'
+          '可编辑该账号并点「从服务器读取文件夹列表」选取')));
+    } catch (_) {
+      // 连不上服务器则跳过核对。
+    }
   }
 
   Future<void> _test() async {
@@ -862,12 +773,107 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
     // 密码框只有掩码或留空时用已存密码测试。
     final password = _effectivePassword ??
         ref.read(secretsProvider).mailPasswords[account.id];
-    final error = await MailService(account, password).testConnection();
+    final svc = MailService(account, password);
+    var result = await svc.testConnection();
+    if (result == null) {
+      // 连接成功，顺带核对学习文件夹名（一次额外连接，手动触发可接受）。
+      try {
+        final serverFolders = await svc.listFolders();
+        final missing = [
+          for (final f in account.learnFolders)
+            if (matchMailboxName(serverFolders, f) == null) f,
+        ];
+        result = missing.isEmpty
+            ? '连接成功；学习文件夹「${account.learnFolders.join('、')}」✓ 已匹配'
+            : '连接成功；⚠ 学习文件夹「${missing.join('、')}」在服务器上不存在'
+                '（可点下方按钮从服务器选取）';
+      } catch (_) {
+        result = '连接成功（IMAP 登录正常）';
+      }
+    }
     if (mounted) {
       setState(() {
         _testing = false;
-        _testResult = error ?? '连接成功（IMAP 登录并读取文件夹正常）';
+        _testResult = result;
       });
+    }
+  }
+
+  /// 从服务器读取当前编辑账号的文件夹列表，勾选回填学习文件夹；
+  /// 带 `\Sent` 特殊标记的文件夹标注「服务器已发送」。
+  Future<void> _pickFoldersFromServer() async {
+    final account = _buildFromForm();
+    final password = _effectivePassword ??
+        ref.read(secretsProvider).mailPasswords[account.id];
+    final svc = MailService(account, password);
+    if (!svc.isReceiveReady) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('请先填写邮箱地址、IMAP 服务器和密码')));
+      return;
+    }
+    try {
+      final (folders, recommended) = await svc.listFoldersWithSentFlag();
+      if (!mounted) return;
+      final selected = _parseFolders().toSet();
+      await showDialog(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (dialogContext, setDialogState) => AlertDialog(
+            title: const Text('选择历史学习文件夹'),
+            content: SizedBox(
+              width: 400,
+              height: 380,
+              child: ListView(
+                children: [
+                  for (final f in folders)
+                    CheckboxListTile(
+                      value: selected.contains(f),
+                      onChanged: (v) => setDialogState(() =>
+                          v == true ? selected.add(f) : selected.remove(f)),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      dense: true,
+                      title: Row(
+                        children: [
+                          Expanded(
+                              child:
+                                  Text(f, overflow: TextOverflow.ellipsis)),
+                          if (f == recommended)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.green.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Text('服务器已发送',
+                                  style: TextStyle(
+                                      fontSize: 10, color: Colors.green)),
+                            ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('完成'),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (!mounted) return;
+      setState(() {
+        _learnFolders.text = selected.join(', ');
+        _foldersTouched = true;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('读取文件夹失败：$e')));
+      }
     }
   }
 
@@ -896,28 +902,46 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _field(_email, '邮箱地址（同时作为登录用户名）'),
+              _field(_email, '邮箱地址（同时作为登录用户名）',
+                  helper: '常见邮箱（Gmail / QQ / 163 / Outlook 等）'
+                      '输入地址后自动填充下方服务器与学习文件夹'),
               _field(_displayName, '发件显示名（可选）'),
               Row(children: [
-                Expanded(child: _field(_imapHost, 'IMAP 服务器，如 imap.qq.com')),
+                Expanded(
+                    child: _field(_imapHost, 'IMAP 服务器，如 imap.qq.com',
+                        onChanged: (_) => _hostsTouched = true)),
                 const SizedBox(width: 12),
-                SizedBox(width: 120, child: _field(_imapPort, '端口', num: true)),
+                SizedBox(
+                    width: 120,
+                    child: _field(_imapPort, '端口', num: true,
+                        onChanged: (_) => _hostsTouched = true)),
               ]),
               SwitchListTile(
                 value: _imapSecure,
-                onChanged: (v) => setState(() => _imapSecure = v),
+                onChanged: (v) => setState(() {
+                  _imapSecure = v;
+                  _hostsTouched = true;
+                }),
                 title: const Text('IMAP 使用 SSL（993 端口通常开启）'),
                 dense: true,
               ),
               Row(children: [
                 Expanded(
-                    child: _field(_smtpHost, 'SMTP 服务器，如 smtp.qq.com（只收信可留空）')),
+                    child: _field(
+                        _smtpHost, 'SMTP 服务器，如 smtp.qq.com（只收信可留空）',
+                        onChanged: (_) => _hostsTouched = true)),
                 const SizedBox(width: 12),
-                SizedBox(width: 120, child: _field(_smtpPort, '端口', num: true)),
+                SizedBox(
+                    width: 120,
+                    child: _field(_smtpPort, '端口', num: true,
+                        onChanged: (_) => _hostsTouched = true)),
               ]),
               SwitchListTile(
                 value: _smtpSecure,
-                onChanged: (v) => setState(() => _smtpSecure = v),
+                onChanged: (v) => setState(() {
+                  _smtpSecure = v;
+                  _hostsTouched = true;
+                }),
                 title: const Text('SMTP 加密（465=SSL / 587=STARTTLS）'),
                 dense: true,
               ),
@@ -928,6 +952,23 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
                 onChanged: (v) => setState(() => _receiveEnabled = v),
                 title: const Text('收信（IMAP：拉取收件箱、参与学习）'),
                 dense: true,
+              ),
+              _field(
+                _learnFolders,
+                '历史学习文件夹（逗号分隔，默认 Sent）',
+                helper: '文件夹名因邮箱服务商而异：Gmail 为 [Gmail]/Sent Mail'
+                    '（中文账号为 [Gmail]/已发送邮件）、QQ/163 为 Sent Messages、'
+                    'Outlook 为 Sent。常见命名会自动匹配，不确定可点下方按钮'
+                    '从服务器选取',
+                onChanged: (_) => _foldersTouched = true,
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  icon: const Icon(Icons.folder_open),
+                  label: const Text('从服务器读取文件夹列表'),
+                  onPressed: _pickFoldersFromServer,
+                ),
               ),
               SwitchListTile(
                 value: _sendEnabled,
@@ -951,9 +992,11 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
                   child: Text(
                     _testResult!,
                     style: TextStyle(
-                      color: _testResult!.contains('成功')
-                          ? Colors.green
-                          : Colors.red,
+                      color: _testResult!.contains('⚠')
+                          ? Colors.orange.shade800
+                          : (_testResult!.contains('成功')
+                              ? Colors.green
+                              : Colors.red),
                     ),
                   ),
                 ),
@@ -975,13 +1018,17 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
   }
 
   Widget _field(TextEditingController c, String label,
-          {bool obscure = false, bool num = false, String? helper}) =>
+          {bool obscure = false,
+          bool num = false,
+          String? helper,
+          ValueChanged<String>? onChanged}) =>
       Padding(
         padding: const EdgeInsets.only(bottom: 10),
         child: TextField(
           controller: c,
           obscureText: obscure,
           keyboardType: num ? TextInputType.number : null,
+          onChanged: onChanged,
           decoration: InputDecoration(
             labelText: label,
             helperText: helper,

@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/conversation.dart';
+import '../../models/draft_record.dart';
 import '../../models/email_summary.dart';
 import '../../providers/app_providers.dart';
+import '../drafts/draft_actions.dart';
 import '../drafts/draft_edit_page.dart';
 
 /// 收件箱（聊天式）：左侧为按「发件人 × 收件人」参与人集合汇总的会话列表，
@@ -280,10 +282,15 @@ class _ChatDetailState extends ConsumerState<_ChatDetail> {
   @override
   void didUpdateWidget(covariant _ChatDetail oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // 切换会话或刷新带来新邮件时停在最新一条。
+    // 切换会话、刷新带来新邮件或草稿数量变化时停在最新一条。
+    final records = ref.read(draftsProvider).records;
+    final oldDraftCount =
+        _visibleDrafts(oldWidget.conversation, records).length;
+    final newDraftCount = _visibleDrafts(widget.conversation, records).length;
     if (oldWidget.conversation.key != widget.conversation.key ||
         oldWidget.conversation.messages.length !=
-            widget.conversation.messages.length) {
+            widget.conversation.messages.length ||
+        oldDraftCount != newDraftCount) {
       _jumpToBottomAfterFrame();
     }
   }
@@ -302,6 +309,46 @@ class _ChatDetailState extends ConsumerState<_ChatDetail> {
     });
   }
 
+  /// 会话时间线里应展示的草稿：
+  /// - 编辑中的始终展示；
+  /// - 已发送（含手工标注）在「对应的真实邮件尚未同步进缓存」时过渡展示
+  ///   （正文或引用头+主题能匹配到会话我方邮件即让位，避免重复）；
+  /// - 已丢弃、与本会话无关的不展示。
+  List<DraftRecord> _visibleDrafts(
+      Conversation conv, List<DraftRecord> all) {
+    final msgIds = conv.messages.map((m) => m.messageId).toSet();
+    final participants =
+        conv.participants.map((p) => p.toLowerCase()).toSet();
+    final myMails = conv.messages.where((m) => conv.isFromMe(m)).toList();
+    final mySentBodies = myMails
+        .map((m) => m.bodyText.trim())
+        .where((t) => t.isNotEmpty)
+        .toSet();
+    // 引用头 + 归一化主题匹配：列表阶段真实邮件正文未回填时也能识别已同步。
+    final repliedAnchors = myMails
+        .where((m) => m.inReplyTo != null && m.inReplyTo!.isNotEmpty)
+        .map((m) => '${m.inReplyTo}|${m.normalizedSubject}')
+        .toSet();
+    return all.where((d) {
+      final anchored = msgIds.contains(d.emailMessageId) ||
+          participants.contains(d.toAddress.toLowerCase());
+      if (!anchored) return false;
+      switch (d.status) {
+        case DraftStatus.editing:
+          return true;
+        case DraftStatus.sentManually:
+        case DraftStatus.sentUnmodified:
+        case DraftStatus.sentEdited:
+          final text = (d.finalSentText ?? '').trim();
+          if (text.isEmpty || mySentBodies.contains(text)) return false;
+          return !repliedAnchors.contains(
+              '${d.emailMessageId}|${EmailSummary.normalizeSubject(d.subject)}');
+        case DraftStatus.discarded:
+          return false;
+      }
+    }).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     final conv = widget.conversation;
@@ -310,6 +357,7 @@ class _ChatDetailState extends ConsumerState<_ChatDetail> {
     final generating = drafts.generating;
     final space = ref.watch(currentSpaceProvider).space;
     final selected = inbox.selectedMessage;
+    final convDrafts = _visibleDrafts(conv, drafts.records);
     final title =
         conv.participants.isEmpty ? '（本空间内部往来）' : conv.participants.join('、');
 
@@ -331,7 +379,9 @@ class _ChatDetailState extends ConsumerState<_ChatDetail> {
                 ),
               ),
               const SizedBox(height: 2),
-              Text('${conv.messages.length} 封往来（含已发出）',
+              Text(
+                  '${conv.messages.length} 封往来（含已发出）'
+                  '${convDrafts.isEmpty ? '' : ' · ${convDrafts.length} 份草稿'}',
                   style: Theme.of(context).textTheme.bodySmall),
             ],
           ),
@@ -387,12 +437,32 @@ class _ChatDetailState extends ConsumerState<_ChatDetail> {
         Expanded(
           child: LayoutBuilder(builder: (context, constraints) {
             final maxBubbleWidth = constraints.maxWidth * 0.65;
+            // 邮件与草稿混排，按时间升序（草稿编辑中按创建时间、已发送按发送时间）。
+            final timeline = <(DateTime, Object)>[
+              for (final m in conv.messages)
+                (m.parsedDate ?? DateTime(2000), m as Object),
+              for (final d in convDrafts)
+                (
+                  DateTime.tryParse(
+                          d.sentAt?.toIso8601String() ?? d.createdAt) ??
+                      DateTime(2000),
+                  d as Object
+                ),
+            ]..sort((a, b) => a.$1.compareTo(b.$1));
             return ListView.builder(
               controller: _scrollController,
               padding: const EdgeInsets.all(16),
-              itemCount: conv.messages.length,
+              itemCount: timeline.length,
               itemBuilder: (context, i) {
-                final m = conv.messages[i];
+                final item = timeline[i].$2;
+                if (item is DraftRecord) {
+                  return Align(
+                    alignment: Alignment.centerRight,
+                    child: _DraftBubble(
+                        record: item, maxWidth: maxBubbleWidth),
+                  );
+                }
+                final m = item as EmailSummary;
                 final fromMe = conv.isFromMe(m);
                 final accountEmail =
                     space?.accountById(m.accountId)?.email ?? '';
@@ -493,6 +563,177 @@ class _ForwardedWarning extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 会话时间线里的草稿气泡：右侧对齐、描边区分，带编辑 / 发送 /
+/// 标注已发送 / 删除操作（手工标注的仅可删除）。
+class _DraftBubble extends ConsumerStatefulWidget {
+  const _DraftBubble({required this.record, required this.maxWidth});
+
+  final DraftRecord record;
+  final double maxWidth;
+
+  @override
+  ConsumerState<_DraftBubble> createState() => _DraftBubbleState();
+}
+
+class _DraftBubbleState extends ConsumerState<_DraftBubble> {
+  bool _busy = false;
+
+  DraftRecord get record => widget.record;
+
+  Future<void> _send() async {
+    if (_busy) return;
+    if (!await confirmSendDraft(context, record)) return;
+    setState(() => _busy = true);
+    final ok = await ref
+        .read(draftsProvider.notifier)
+        .send(record, record.effectiveText);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    final msg = ok
+        ? (ref.read(draftsProvider).feedbackMessage ?? '已发送')
+        : (ref.read(draftsProvider).error ?? '发送失败');
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _markSent() async {
+    if (_busy) return;
+    final confirmed = await confirmMarkDraftSentManually(context);
+    if (confirmed == null) return;
+    setState(() => _busy = true);
+    await ref
+        .read(draftsProvider.notifier)
+        .markManuallySent(record, runFeedback: confirmed.runFeedback);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(ref.read(draftsProvider).feedbackMessage ??
+            '已标注为已发送')));
+  }
+
+  Future<void> _delete() async {
+    if (_busy) return;
+    if (!await confirmDeleteDraft(context)) return;
+    await ref.read(draftsProvider.notifier).deleteDraft(record);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final editing = record.status == DraftStatus.editing;
+    final manual = record.status == DraftStatus.sentManually;
+    final (chipColor, chipText) = switch (record.status) {
+      DraftStatus.editing => (Colors.orange.shade800, '草稿'),
+      DraftStatus.sentManually => (Colors.green.shade800, '已发送 · 手工标注'),
+      _ => (Colors.green.shade800, '已发送'),
+    };
+    final date = _formatShortDate(DateTime.tryParse(
+        record.sentAt?.toIso8601String() ?? record.createdAt));
+
+    Widget action(IconData icon, String label, VoidCallback onPressed) =>
+        TextButton.icon(
+          onPressed: _busy ? null : onPressed,
+          icon: Icon(icon, size: 15),
+          label: Text(label),
+          style: TextButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            minimumSize: const Size(0, 32),
+          ),
+        );
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      constraints: BoxConstraints(maxWidth: widget.maxWidth),
+      decoration: BoxDecoration(
+        color: editing ? Colors.orange.shade50 : Colors.green.shade50,
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(12),
+          topRight: Radius.circular(12),
+          bottomLeft: Radius.circular(12),
+          bottomRight: Radius.circular(4),
+        ),
+        border: Border.all(
+          color: editing
+              ? Colors.orange.shade300
+              : Colors.green.shade300,
+          width: 1.2,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: chipColor.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(chipText,
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: chipColor)),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '回复：${record.subject}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurface,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          SelectableText(
+            record.effectiveText,
+            style: const TextStyle(height: 1.5, fontSize: 14),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            editing
+                ? '$date · 未发送的草稿不会计入后续草稿生成与学习'
+                : '$date · 已计入后续草稿生成与学习的参考',
+            style:
+                TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 2,
+            runSpacing: 2,
+            children: [
+              if (editing) ...[
+                action(Icons.edit, '编辑', () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                          builder: (_) =>
+                              DraftEditPage(draftId: record.id)),
+                    )),
+                action(Icons.send, _busy ? '发送中…' : '发送', _send),
+                action(Icons.mark_email_read_outlined, '标注已发送',
+                    _markSent),
+              ],
+              if (editing || manual)
+                action(Icons.delete_outline, '删除', _delete),
+            ],
+          ),
+        ],
       ),
     );
   }

@@ -25,6 +25,10 @@ void main() {
       expect(matchMailboxName(const ['INBOX', '已发邮件'], 'sent'), '已发邮件');
       expect(matchMailboxName(const ['INBOX', '[Gmail]/Sent Mail'], 'Sent'),
           '[Gmail]/Sent Mail');
+      // 中文界面 Gmail 的叶子名「已发送邮件」也在别名组内。
+      expect(matchMailboxName(const ['INBOX', '已发送邮件'], 'Sent'), '已发送邮件');
+      expect(matchMailboxName(const ['INBOX', '[Gmail]/已发送邮件'], 'Sent'),
+          '[Gmail]/已发送邮件');
       // 反向：配置中文名也能命中英文命名。
       expect(matchMailboxName(const ['INBOX', 'Sent Messages'], '已发送'),
           'Sent Messages');
