@@ -75,6 +75,43 @@ class LearnPage extends ConsumerWidget {
             padding: const EdgeInsets.only(bottom: 8),
             child: Text(state.error!, style: const TextStyle(color: Colors.red)),
           ),
+        if (state.failedFolders.isNotEmpty)
+          Card(
+            color: Colors.orange.shade50,
+            margin: const EdgeInsets.only(bottom: 8),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.warning_amber_rounded,
+                          size: 18, color: Colors.orange.shade800),
+                      const SizedBox(width: 6),
+                      Text('部分学习文件夹拉取失败',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.orange.shade900)),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  for (final f in state.failedFolders)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(f, style: const TextStyle(fontSize: 13)),
+                    ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    '请在「空间」页 → 学习偏好 → 历史学习文件夹 中改用服务器实际存在的'
+                    '文件夹名，或点「从服务器读取文件夹列表」直接选择；常用已发送命名'
+                    '（Sent / Sent Messages / Sent Items / 已发送）会自动匹配。',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
+              ),
+            ),
+          ),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),

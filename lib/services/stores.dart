@@ -80,28 +80,54 @@ class DraftStore {
   String newId() => newDraftId();
 }
 
-/// 收件箱缓存条目：一个收信账号一份，含增量同步状态。
-class InboxCacheEntry {
-  InboxCacheEntry({
-    required this.messages,
-    this.uidValidity,
-    this.lastUid,
-    DateTime? fetchedAt,
-  }) : fetchedAt = fetchedAt ?? DateTime.now();
+/// 单个文件夹的增量同步游标。
+class FolderCursor {
+  const FolderCursor({this.uidValidity, this.lastUid});
 
-  final List<EmailSummary> messages;
-
-  /// INBOX 的 UIDVALIDITY，与服务器不一致说明邮箱重建过，需全量重拉。
+  /// 该文件夹的 UIDVALIDITY，与服务器不一致说明邮箱重建过，需全量重拉。
   final int? uidValidity;
 
   /// 已同步到的最大 UID；下次只拉它之后的新邮件。
   final int? lastUid;
 
+  @override
+  bool operator ==(Object other) =>
+      other is FolderCursor &&
+      other.uidValidity == uidValidity &&
+      other.lastUid == lastUid;
+
+  @override
+  int get hashCode => Object.hash(uidValidity, lastUid);
+
+  Map<String, dynamic> toMap() =>
+      {'uid_validity': uidValidity, 'last_uid': lastUid};
+
+  static FolderCursor fromMap(Map<dynamic, dynamic> map) => FolderCursor(
+        uidValidity: map['uid_validity'] as int?,
+        lastUid: map['last_uid'] as int?,
+      );
+}
+
+/// 收件箱缓存条目：一个收信账号一份，INBOX 与已发送各自持有增量游标。
+class InboxCacheEntry {
+  InboxCacheEntry({
+    required this.messages,
+    this.inboxCursor,
+    this.sentCursor,
+    DateTime? fetchedAt,
+  }) : fetchedAt = fetchedAt ?? DateTime.now();
+
+  /// 该账号全部文件夹的邮件（folder 字段区分 INBOX / 已发送）。
+  final List<EmailSummary> messages;
+
+  final FolderCursor? inboxCursor;
+  final FolderCursor? sentCursor;
+
   final DateTime fetchedAt;
 
   Map<String, dynamic> toMap() => {
-        'uid_validity': uidValidity,
-        'last_uid': lastUid,
+        'inbox': inboxCursor?.toMap(),
+        'sent': sentCursor?.toMap(),
         'fetched_at': fetchedAt.toIso8601String(),
         'messages': messages.map((e) => e.toMap()).toList(),
       };
@@ -110,10 +136,23 @@ class InboxCacheEntry {
         messages: (map['messages'] as List? ?? [])
             .map((e) => EmailSummary.fromMap(e as Map))
             .toList(),
-        uidValidity: map['uid_validity'] as int?,
-        lastUid: map['last_uid'] as int?,
+        inboxCursor: _cursorOf(map, 'inbox'),
+        sentCursor: _cursorOf(map, 'sent'),
         fetchedAt: DateTime.tryParse(map['fetched_at'] as String? ?? ''),
       );
+
+  /// 新格式游标存在 `inbox:`/`sent:` 子表里；旧格式只有顶层
+  /// `uid_validity`/`last_uid`（当时仅同步 INBOX），迁移为收件游标。
+  static FolderCursor? _cursorOf(Map<dynamic, dynamic> map, String role) {
+    final nested = map[role] as Map?;
+    if (nested != null) return FolderCursor.fromMap(nested);
+    if (role != 'inbox') return null;
+    if (map['uid_validity'] == null && map['last_uid'] == null) return null;
+    return FolderCursor(
+      uidValidity: map['uid_validity'] as int?,
+      lastUid: map['last_uid'] as int?,
+    );
+  }
 }
 
 /// 收件箱缓存存储（空间内 `inbox_cache/<accountId>.yaml`，每账号一个文件）。
@@ -157,8 +196,9 @@ class InboxCacheStore {
   }
 }
 
-/// 合并缓存与新拉取的邮件：同账号下按 UID（无 UID 退化为 Message-ID）去重、
-/// 新数据覆盖旧数据，按时间倒序后截取最近 [limit] 封。
+/// 合并缓存与新拉取的邮件：同账号同文件夹下按 UID（无 UID 退化为 Message-ID）
+/// 去重、新数据覆盖旧数据，按时间倒序后截取最近 [limit] 封。
+/// 注意 folder 参与去重键 —— INBOX 与已发送的 UID 各自独立，不能互撞。
 List<EmailSummary> mergeInboxMessages(
   List<EmailSummary> cached,
   List<EmailSummary> fetched, {
@@ -175,5 +215,5 @@ List<EmailSummary> mergeInboxMessages(
 }
 
 String _mergeKey(EmailSummary m) => m.uid != null
-    ? '${m.accountId}:uid:${m.uid}'
-    : '${m.accountId}:mid:${m.messageId}';
+    ? '${m.accountId}:${m.folder}:uid:${m.uid}'
+    : '${m.accountId}:${m.folder}:mid:${m.messageId}';

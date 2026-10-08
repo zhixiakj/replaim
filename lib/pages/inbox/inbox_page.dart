@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../models/conversation.dart';
 import '../../models/email_summary.dart';
 import '../../providers/app_providers.dart';
 import '../drafts/draft_edit_page.dart';
 
-/// 收件箱：左列表右详情（桌面双栏）。
-/// 汇总当前空间内全部收信账号的邮件，按时间倒序合并展示。
+/// 收件箱（聊天式）：左侧为按「发件人 × 收件人」参与人集合汇总的会话列表，
+/// 右侧以聊天气泡展示会话往来 —— 对方来信靠左、本空间发出的邮件靠右，
+/// 收到的与发出的邮件合并进同一会话。
 class InboxPage extends ConsumerStatefulWidget {
   const InboxPage({super.key});
 
@@ -28,7 +30,7 @@ class _InboxPageState extends ConsumerState<InboxPage> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(inboxProvider);
-    final selected = state.selected;
+    final selected = state.selectedConversation;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -75,18 +77,18 @@ class _InboxPageState extends ConsumerState<InboxPage> {
                       style: const TextStyle(color: Colors.red)),
                 ),
               Expanded(
-                child: state.messages.isEmpty && !state.loading
+                child: state.conversations.isEmpty && !state.loading
                     ? const Center(child: Text('暂无邮件，请先在空间中配置账号并刷新'))
                     : ListView.builder(
-                        itemCount: state.messages.length,
+                        itemCount: state.conversations.length,
                         itemBuilder: (context, i) {
-                          final m = state.messages[i];
-                          return _MailTile(
-                            email: m,
-                            selected: selected?.messageId == m.messageId,
+                          final conv = state.conversations[i];
+                          return _ConversationTile(
+                            conversation: conv,
+                            selected: selected?.key == conv.key,
                             onTap: () => ref
                                 .read(inboxProvider.notifier)
-                                .select(m),
+                                .selectConversation(conv),
                           );
                         },
                       ),
@@ -97,47 +99,76 @@ class _InboxPageState extends ConsumerState<InboxPage> {
         const VerticalDivider(width: 1, thickness: 1),
         Expanded(
           child: selected == null
-              ? const Center(child: Text('选择一封邮件查看详情'))
-              : _MailDetail(email: selected),
+              ? const Center(child: Text('选择一个会话查看往来'))
+              : _ChatDetail(conversation: selected),
         ),
       ],
     );
   }
 }
 
-class _MailTile extends ConsumerWidget {
-  const _MailTile({required this.email, required this.selected, this.onTap});
+String _formatShortDate(DateTime? date) {
+  if (date == null) return '';
+  final mm = date.month.toString().padLeft(2, '0');
+  final dd = date.day.toString().padLeft(2, '0');
+  final hh = date.hour.toString().padLeft(2, '0');
+  final mi = date.minute.toString().padLeft(2, '0');
+  return '$mm-$dd $hh:$mi';
+}
 
-  final EmailSummary email;
+/// 头像底色：按参与人串做稳定散列取色相，同一会话跨重启颜色不变
+/// （不用 String.hashCode，它在每次运行间不稳定）。
+Color _avatarColor(String seed) {
+  var h = 0;
+  for (final c in seed.codeUnits) {
+    h = (h * 31 + c) & 0x7fffffff;
+  }
+  return HSVColor.fromAHSV(0.62, (h % 360).toDouble(), 0.42, 0.92).toColor();
+}
+
+class _ConversationTile extends StatelessWidget {
+  const _ConversationTile({
+    required this.conversation,
+    required this.selected,
+    this.onTap,
+  });
+
+  final Conversation conversation;
   final bool selected;
   final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final date = email.parsedDate;
-    final dateText = date == null
-        ? ''
-        : '${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')} '
-            '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
-    final accountEmail =
-        ref.watch(currentSpaceProvider).space?.accountById(email.accountId)?.email ??
-            '';
-    final forwarded = email.originalRecipients.isNotEmpty;
+  Widget build(BuildContext context) {
+    final last = conversation.lastMessage;
+    final title = conversation.participants.isEmpty
+        ? '（本空间内部往来）'
+        : conversation.participants.join('、');
+    final snippet = last.snippet.isEmpty ? '（无正文）' : last.snippet;
     return ListTile(
       selected: selected,
       onTap: onTap,
+      leading: CircleAvatar(
+        radius: 18,
+        backgroundColor: _avatarColor(conversation.key),
+        child: Text(
+          title.isEmpty ? '?' : title[0].toUpperCase(),
+          style: const TextStyle(
+              color: Colors.white, fontWeight: FontWeight.w600, fontSize: 15),
+        ),
+      ),
       title: Row(
         children: [
-          if (forwarded)
+          if (conversation.hasForwarded) ...[
             Tooltip(
-              message: '转发邮件：原始收件 ${email.originalRecipients.join('、')}',
+              message: '会话中含转发邮件，原始收件不在本空间账号内',
               child: Icon(Icons.forward_to_inbox,
                   size: 16, color: Colors.orange.shade800),
             ),
-          if (forwarded) const SizedBox(width: 4),
+            const SizedBox(width: 4),
+          ],
           Expanded(
             child: Text(
-              email.subject,
+              title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontWeight: FontWeight.w600),
@@ -145,129 +176,337 @@ class _MailTile extends ConsumerWidget {
           ),
         ],
       ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            accountEmail.isEmpty
-                ? email.fromAddress
-                : '[$accountEmail] ${email.fromAddress}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          Text(email.snippet,
-              maxLines: 1, overflow: TextOverflow.ellipsis),
-        ],
+      subtitle: Text(
+        conversation.lastFromMe ? '我：$snippet' : snippet,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       ),
-      isThreeLine: true,
-      trailing: Text(dateText, style: Theme.of(context).textTheme.bodySmall),
+      trailing: Text(_formatShortDate(last.parsedDate),
+          style: Theme.of(context).textTheme.bodySmall),
     );
   }
 }
 
-class _MailDetail extends ConsumerWidget {
-  const _MailDetail({required this.email});
+/// 会话详情：顶部参与人与生成草稿操作条，下方时间升序的气泡往来。
+class _ChatDetail extends ConsumerStatefulWidget {
+  const _ChatDetail({required this.conversation});
 
-  final EmailSummary email;
+  final Conversation conversation;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_ChatDetail> createState() => _ChatDetailState();
+}
+
+class _ChatDetailState extends ConsumerState<_ChatDetail> {
+  final _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _jumpToBottomAfterFrame();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ChatDetail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 切换会话或刷新带来新邮件时停在最新一条。
+    if (oldWidget.conversation.key != widget.conversation.key ||
+        oldWidget.conversation.messages.length !=
+            widget.conversation.messages.length) {
+      _jumpToBottomAfterFrame();
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _jumpToBottomAfterFrame() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final conv = widget.conversation;
     final inbox = ref.watch(inboxProvider);
     final drafts = ref.watch(draftsProvider);
     final generating = drafts.generating;
-    final accountEmail =
-        ref.watch(currentSpaceProvider).space?.accountById(email.accountId)?.email ??
-            '';
+    final space = ref.watch(currentSpaceProvider).space;
+    final selected = inbox.selectedMessage;
+    final title =
+        conv.participants.isEmpty ? '（本空间内部往来）' : conv.participants.join('、');
 
-    return ListView(
-      padding: const EdgeInsets.all(24),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                email.subject,
-                style: Theme.of(context).textTheme.titleLarge,
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Tooltip(
+                message: title,
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
               ),
-            ),
-            FilledButton.icon(
-              onPressed: generating ? null : () => _generateDraft(context, ref),
-              icon: generating
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.auto_awesome),
-              label: Text(generating ? '生成中…' : '依据规则生成草稿'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Text(
-          '发件人：${email.fromAddress}　·　${email.date}'
-          '${accountEmail.isEmpty ? "" : "　·　收信账号：$accountEmail"}',
-        ),
-        if (email.originalRecipients.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          Card(
-            color: Colors.orange.shade50,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.forward_to_inbox,
-                      size: 18, color: Colors.orange.shade800),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '检测到转发：客户原始收件地址为 ${email.originalRecipients.join('、')}，'
-                      '（不在本空间账号内）。生成草稿时会默认通过 $accountEmail 发送并抄送上述地址，'
-                      '可在草稿页调整。',
-                      style: const TextStyle(height: 1.5),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+              const SizedBox(height: 2),
+              Text('${conv.messages.length} 封往来（含已发出）',
+                  style: Theme.of(context).textTheme.bodySmall),
+            ],
           ),
-        ],
-        if (inbox.threadPeers.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          Text('本线程往来（${inbox.threadPeers.length} 封）',
-              style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 4),
-          for (final p in inbox.threadPeers)
-            Text(
-              '· ${p.date} ${p.fromAddress}：${p.snippet}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-        ],
-        const Divider(height: 32),
-        SelectableText(
-          email.bodyText.isEmpty ? email.snippet : email.bodyText,
-          style: const TextStyle(height: 1.6, fontSize: 14),
         ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  selected == null
+                      ? (conv.latestIncoming == null
+                          ? '本会话暂无对方来件，无法生成草稿'
+                          : '点击对方邮件气泡后可生成草稿')
+                      : '选中：${selected.subject}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                onPressed: (generating || selected == null)
+                    ? null
+                    : () => _generateDraft(context),
+                icon: generating
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.auto_awesome),
+                label: Text(generating ? '生成中…' : '依据规则生成草稿'),
+              ),
+            ],
+          ),
+        ),
+        if (selected != null && selected.originalRecipients.isNotEmpty) ...[
+          _ForwardedWarning(
+              email: selected,
+              accountEmail:
+                  space?.accountById(selected.accountId)?.email ?? ''),
+        ],
         if (drafts.error != null)
           Padding(
-            padding: const EdgeInsets.only(top: 16),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Text(drafts.error!,
                 style: const TextStyle(color: Colors.red)),
           ),
+        const Divider(height: 1),
+        Expanded(
+          child: LayoutBuilder(builder: (context, constraints) {
+            final maxBubbleWidth = constraints.maxWidth * 0.65;
+            return ListView.builder(
+              controller: _scrollController,
+              padding: const EdgeInsets.all(16),
+              itemCount: conv.messages.length,
+              itemBuilder: (context, i) {
+                final m = conv.messages[i];
+                final fromMe = conv.isFromMe(m);
+                final accountEmail =
+                    space?.accountById(m.accountId)?.email ?? '';
+                return Align(
+                  alignment: fromMe
+                      ? Alignment.centerRight
+                      : Alignment.centerLeft,
+                  child: Column(
+                    crossAxisAlignment: fromMe
+                        ? CrossAxisAlignment.end
+                        : CrossAxisAlignment.start,
+                    children: [
+                      if (!fromMe)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 4, bottom: 2),
+                          child: Text(
+                            m.fromAddress,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant),
+                          ),
+                        ),
+                      _MessageBubble(
+                        email: m,
+                        fromMe: fromMe,
+                        accountEmail: accountEmail,
+                        selected:
+                            inbox.selectedMessage?.messageId == m.messageId,
+                        maxWidth: maxBubbleWidth,
+                        onTap: () => ref
+                            .read(inboxProvider.notifier)
+                            .selectMessage(m),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            );
+          }),
+        ),
       ],
     );
   }
 
-  Future<void> _generateDraft(BuildContext context, WidgetRef ref) async {
-    final id =
-        await ref.read(draftsProvider.notifier).generateFor(email);
+  Future<void> _generateDraft(BuildContext context) async {
+    final email = ref.read(inboxProvider).selectedMessage;
+    if (email == null) return;
+    final id = await ref.read(draftsProvider.notifier).generateFor(email);
     if (id != null && context.mounted) {
       ref.read(draftsProvider.notifier).clearMessages();
       await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => DraftEditPage(draftId: id),
       ));
     }
+  }
+}
+
+class _ForwardedWarning extends StatelessWidget {
+  const _ForwardedWarning({required this.email, required this.accountEmail});
+
+  final EmailSummary email;
+  final String accountEmail;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Card(
+        color: Colors.orange.shade50,
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.forward_to_inbox,
+                  size: 18, color: Colors.orange.shade800),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '检测到转发：客户原始收件地址为 ${email.originalRecipients.join('、')}，'
+                  '（不在本空间账号内）。生成草稿时会默认通过 $accountEmail 发送并抄送上述地址，'
+                  '可在草稿页调整。',
+                  style: const TextStyle(height: 1.4),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MessageBubble extends StatelessWidget {
+  const _MessageBubble({
+    required this.email,
+    required this.fromMe,
+    required this.accountEmail,
+    required this.selected,
+    required this.maxWidth,
+    this.onTap,
+  });
+
+  final EmailSummary email;
+  final bool fromMe;
+  final String accountEmail;
+  final bool selected;
+  final double maxWidth;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final body = email.bodyText.isEmpty ? email.snippet : email.bodyText;
+    // Listener 在指针下压阶段即触发（先于子组件手势竞技），
+    // 保证点在 SelectableText 正文上也能选中气泡。
+    return Listener(
+      onPointerDown: (_) => onTap?.call(),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(12),
+          constraints: BoxConstraints(maxWidth: maxWidth),
+          decoration: BoxDecoration(
+            color: fromMe
+                ? scheme.primaryContainer
+                : scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(12),
+              topRight: const Radius.circular(12),
+              bottomLeft: fromMe
+                  ? const Radius.circular(12)
+                  : const Radius.circular(4),
+              bottomRight: fromMe
+                  ? const Radius.circular(4)
+                  : const Radius.circular(12),
+            ),
+            // 常驻边框宽度，选中只变色，避免布局抖动。
+            border: Border.all(
+              color: selected ? scheme.primary : Colors.transparent,
+              width: 1.5,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                email.subject,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 4),
+              SelectableText(
+                body,
+                style: const TextStyle(height: 1.5, fontSize: 14),
+              ),
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  '${_formatShortDate(email.parsedDate)} · '
+                  '${fromMe ? '经 $accountEmail 发出' : '收信 $accountEmail'}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

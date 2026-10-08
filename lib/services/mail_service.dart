@@ -97,7 +97,6 @@ class MailService {
       final mailbox = folder == 'INBOX'
           ? await client.selectInbox()
           : await _selectByName(client, folder);
-      if (mailbox == null) return [];
       return await _fetchSummaries(
           client, mailbox, folder, limit, accountId, spaceAddresses);
     } finally {
@@ -105,12 +104,16 @@ class MailService {
     }
   }
 
-  /// 增量同步 INBOX（配合 InboxCacheStore 的缓存状态）：
+  /// 增量同步指定文件夹（默认 INBOX，配合 InboxCacheStore 的缓存状态）：
   /// - 无缓存 / UIDVALIDITY 与服务器不一致 → 全量拉最近 [limit] 封重建；
   /// - uidNext 显示积压新邮件超过 [limit] 封（离线太久）→ 同样走全量；
   /// - uidNext 显示没有新邮件 → 一条 FETCH 都不发，缓存原样返回；
   /// - 其余情况只 FETCH lastUid 之后的新邮件（含正文），与缓存合并去重。
+  ///
+  /// [folder] 为 'INBOX' 时直选收件箱；否则按名字解析真实文件夹
+  /// （如 Gmail 的 '[Gmail]/Sent Mail'），结果与邮件标签都用解析后的名字。
   Future<InboxSyncResult> fetchIncremental({
+    String folder = 'INBOX',
     int limit = 50,
     String accountId = '',
     Set<String> spaceAddresses = const {},
@@ -120,7 +123,12 @@ class MailService {
   }) async {
     final client = await _connect();
     try {
-      final mailbox = await client.selectInbox();
+      final mailbox = folder == 'INBOX'
+          ? await client.selectInbox()
+          : await _selectByName(client, folder);
+      // INBOX 恒为 'INBOX'（与旧缓存标签一致）；其它文件夹用服务器真实名，
+      // 作为缓存游标与去重键的一部分，避免与 INBOX 的 UID 撞车。
+      final folderLabel = folder == 'INBOX' ? 'INBOX' : mailbox.name;
       final uidValidity = mailbox.uidValidity;
       final uidNext = mailbox.uidNext;
       final incrementalOk = uidValidity != null &&
@@ -133,9 +141,10 @@ class MailService {
           : uidNext - 1 - cachedLastUid;
       if (!incrementalOk || (backlog != null && backlog > limit)) {
         final fresh = await _fetchSummaries(
-            client, mailbox, 'INBOX', limit, accountId, spaceAddresses);
+            client, mailbox, folderLabel, limit, accountId, spaceAddresses);
         return InboxSyncResult(
           messages: fresh,
+          folder: folderLabel,
           uidValidity: uidValidity,
           lastUid: _maxUid(fresh) ?? cachedLastUid,
           fullResync: true,
@@ -144,6 +153,7 @@ class MailService {
       if (backlog != null && backlog <= 0) {
         return InboxSyncResult(
           messages: cachedMessages,
+          folder: folderLabel,
           uidValidity: uidValidity,
           lastUid: cachedLastUid,
         );
@@ -156,11 +166,12 @@ class MailService {
       // UID x:* 在 x 超过现存最大 UID 时仍会返回最后一封，需按 UID 过滤。
       final fresh = fetched
           .where((m) => (m.uid ?? 0) > cachedLastUid)
-          .map((m) => _toSummary(m, 'INBOX', accountId, spaceAddresses))
+          .map((m) => _toSummary(m, folderLabel, accountId, spaceAddresses))
           .toList();
       final merged = mergeInboxMessages(cachedMessages, fresh, limit: limit);
       return InboxSyncResult(
         messages: merged,
+        folder: folderLabel,
         uidValidity: uidValidity,
         lastUid: _maxUid(fresh) ?? cachedLastUid,
       );
@@ -188,38 +199,15 @@ class MailService {
         .toList();
   }
 
-  Future<mail.Mailbox?> _selectByName(mail.MailClient client, String name) async {
+  Future<mail.Mailbox> _selectByName(mail.MailClient client, String name) async {
     final boxes = await client.listMailboxes();
-    for (final b in boxes) {
-      if (b.name.toLowerCase() == name.toLowerCase()) {
-        return await client.selectMailbox(b);
-      }
+    final names = boxes.map((b) => b.name).toList();
+    final matched = matchMailboxName(names, name);
+    if (matched == null) {
+      throw FolderNotFoundException(_folderNotFoundMessage(name, names));
     }
-    return null;
+    return client.selectMailbox(boxes.firstWhere((b) => b.name == matched));
   }
-
-  /// 按主题线程键聚合：拉取来信前后若干往来（供草稿生成时的上下文）。
-  Future<List<EmailSummary>> fetchThreadPeers(EmailSummary email) async {
-    final results = <EmailSummary>[];
-    for (final folder in {email.folder, 'INBOX', ..._sentCandidates()}) {
-      try {
-        final list = await fetchRecent(
-            folder: folder, limit: 80, accountId: email.accountId);
-        for (final m in list) {
-          if (m.threadKey == email.threadKey && m.messageId != email.messageId) {
-            results.add(m);
-          }
-        }
-      } catch (_) {
-        // 文件夹不存在等情况直接跳过。
-      }
-    }
-    results.sort((a, b) => (a.parsedDate ?? DateTime(2000))
-        .compareTo(b.parsedDate ?? DateTime(2000)));
-    return results;
-  }
-
-  List<String> _sentCandidates() => const ['Sent', 'Sent Messages', '已发送'];
 
   /// SMTP 发送纯文本回复（带 In-Reply-To 头，便于客户端线程归组）。
   ///
@@ -334,10 +322,67 @@ class MailException implements Exception {
   String toString() => message;
 }
 
-/// 一次 INBOX 增量同步的结果。
+/// 服务器上不存在该文件夹（message 内含现有文件夹列表提示），
+/// 供调用方区分「跳过即可」与「需要报错」的失败。
+class FolderNotFoundException extends MailException {
+  FolderNotFoundException(super.message);
+}
+
+String _folderNotFoundMessage(String name, List<String> names) {
+  final preview = names.take(10).join('、');
+  final more = names.length > 10 ? ' 等共 ${names.length} 个' : '';
+  return '服务器上找不到文件夹「$name」（现有：$preview$more）';
+}
+
+/// 在服务器文件夹名列表中找到与 [want] 匹配的文件夹名，找不到返回 null。
+///
+/// 各家服务商对同一文件夹命名不同（Gmail 是 `[Gmail]/Sent Mail`、QQ 是
+/// `Sent Messages`、网易是 `已发送`），因此按三轮优先级匹配，每轮先扫完
+/// 全部候选再进入下一轮（保证「精确命中」优先于「排在前面的候选」）：
+/// 1. 全名大小写不敏感全等；
+/// 2. 叶子名全等（按 '/' / '.' 分层取末段，兼容 '[Gmail]/Sent Mail'、
+///    'INBOX.Sent' 这类层级命名）；
+/// 3. 「已发送」别名组归一化匹配，让配置 Sent 能命中各家命名。
+String? matchMailboxName(List<String> mailboxNames, String want) {
+  final wanted = _normalizeFolderName(want);
+  if (wanted.isEmpty) return null;
+  for (final name in mailboxNames) {
+    if (_normalizeFolderName(name) == wanted) return name;
+  }
+  for (final name in mailboxNames) {
+    if (_leafFolderName(name) == wanted) return name;
+  }
+  if (!_sentFolderAliases.contains(wanted)) return null;
+  for (final name in mailboxNames) {
+    if (_sentFolderAliases.contains(_leafFolderName(name))) return name;
+  }
+  return null;
+}
+
+String _normalizeFolderName(String name) => name.trim().toLowerCase();
+
+String _leafFolderName(String name) {
+  final normalized = _normalizeFolderName(name);
+  final cut = [normalized.lastIndexOf('.'), normalized.lastIndexOf('/')]
+      .reduce((a, b) => a > b ? a : b);
+  return cut < 0 ? normalized : normalized.substring(cut + 1);
+}
+
+/// 「已发送」文件夹在各家服务商下的常见名字（归一化后）。
+const Set<String> _sentFolderAliases = {
+  'sent',
+  'sent messages',
+  'sent items',
+  'sent mail',
+  '已发送',
+  '已发邮件',
+};
+
+/// 一次文件夹增量同步的结果。
 class InboxSyncResult {
   const InboxSyncResult({
     required this.messages,
+    this.folder = 'INBOX',
     this.uidValidity,
     this.lastUid,
     this.fullResync = false,
@@ -345,6 +390,10 @@ class InboxSyncResult {
 
   /// 合并后的全量列表（≤ limit 封）。
   final List<EmailSummary> messages;
+
+  /// 本次同步的文件夹（解析后的服务器真实名，如 '[Gmail]/Sent Mail'）。
+  final String folder;
+
   final int? uidValidity;
   final int? lastUid;
 

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/app_config.dart';
+import '../models/conversation.dart';
 import '../models/draft_record.dart';
 import '../models/email_summary.dart';
 import '../models/kb_doc.dart';
@@ -418,6 +419,7 @@ class LearnRunState {
     this.resultMessage,
     this.consumedCount = 0,
     this.lastRunAt,
+    this.failedFolders = const [],
   });
 
   final bool running;
@@ -430,6 +432,10 @@ class LearnRunState {
   /// 已消费邮件总数（learn_state 统计）。
   final int consumedCount;
   final DateTime? lastRunAt;
+
+  /// 本次运行中拉取失败的账号/文件夹及完整原因（含服务器现有文件夹列表，
+  /// 供用户对照修改学习文件夹配置）。
+  final List<String> failedFolders;
 }
 
 class LearnController extends Notifier<LearnRunState> {
@@ -494,11 +500,12 @@ class LearnController extends Notifier<LearnRunState> {
         progress: '正在拉取历史邮件…',
         consumedCount: state.consumedCount,
         lastRunAt: state.lastRunAt));
+    final failed = <String>[];
+    final failedDetails = <String>[];
     try {
       final since =
           DateTime.now().subtract(Duration(days: 30 * space.learnMonths));
       final all = <EmailSummary>[];
-      final failed = <String>[];
       for (final account in usable) {
         final mail = MailService(account, secrets.mailPasswords[account.id]);
         for (final folder in space.learnFolders) {
@@ -518,17 +525,19 @@ class LearnController extends Notifier<LearnRunState> {
                 !learnState.hasConsumed(e.messageId)));
           } catch (e) {
             failed.add('${account.email}/$folder');
+            failedDetails.add('${account.email} / $folder：$e');
           }
         }
       }
       final failedNote = failed.isEmpty
           ? ''
-          : '；${failed.length} 个账号/文件夹拉取失败已跳过（${failed.take(3).join('、')}${failed.length > 3 ? ' 等' : ''}）';
+          : '；${failed.length} 个账号/文件夹拉取失败（详见下方警告）';
 
       if (all.isEmpty) {
         _set(LearnRunState(
             consumedCount: learnState.consumed.length,
             lastRunAt: learnState.lastRunAt,
+            failedFolders: failedDetails,
             resultMessage:
                 '没有新的可学习邮件（均已消费过或超出时间范围）$failedNote'));
         return;
@@ -570,6 +579,7 @@ class LearnController extends Notifier<LearnRunState> {
       _set(LearnRunState(
         consumedCount: learnState.consumed.length,
         lastRunAt: learnState.lastRunAt,
+        failedFolders: failedDetails,
         resultMessage: '学习完成：新增 ${result.addedRules.length} 条规则，'
             '更新 ${result.updatedRuleIds.toSet().length} 条，消费 ${consumed.length} 封邮件'
             '$failedNote',
@@ -578,6 +588,7 @@ class LearnController extends Notifier<LearnRunState> {
       _set(LearnRunState(
           consumedCount: learnState.consumed.length,
           lastRunAt: learnState.lastRunAt,
+          failedFolders: failedDetails,
           error: '学习失败：$e'));
     }
   }
@@ -712,23 +723,40 @@ final kbProvider = NotifierProvider<KbController, KbState>(KbController.new);
 class InboxState {
   const InboxState({
     this.messages = const [],
+    this.conversations = const [],
     this.loading = false,
     this.error,
-    this.selected,
-    this.threadPeers = const [],
+    this.selectedKey,
+    this.selectedMessage,
     this.refreshed = false,
   });
 
+  /// 空间内全部邮件（收 + 发），按时间倒序。
   final List<EmailSummary> messages;
+
+  /// 按「发件人 × 收件人」参与人集合汇总的会话，按最后活动时间倒序。
+  final List<Conversation> conversations;
+
   final bool loading;
   final String? error;
-  final EmailSummary? selected;
 
-  /// 选中邮件的同线程往来。
-  final List<EmailSummary> threadPeers;
+  /// 选中会话的规范键（参与人集合键）。
+  final String? selectedKey;
+
+  /// 选中会话内选中的邮件（默认最新来件），生成草稿作用于它。
+  final EmailSummary? selectedMessage;
 
   /// 本次 provider 生命周期内是否已同步过（冷启动自动刷新只触发一次）。
   final bool refreshed;
+
+  Conversation? get selectedConversation {
+    final key = selectedKey;
+    if (key == null) return null;
+    for (final c in conversations) {
+      if (c.key == key) return c;
+    }
+    return null;
+  }
 }
 
 class InboxController extends Notifier<InboxState> {
@@ -751,31 +779,33 @@ class InboxController extends Notifier<InboxState> {
     store.loadAll(accountIds).then((cached) {
       if (!identical(_cacheStore, store)) return; // 空间已切换，丢弃过期结果。
       if (state.messages.isNotEmpty) return; // refresh 已产出更新的数据。
-      _set(InboxState(messages: cached, refreshed: state.refreshed));
+      _setDerived(cached);
     });
     return const InboxState();
   }
 
-  /// 遍历空间内全部收信账号同步，按时间倒序合并；单账号失败不中断。
+  /// 遍历空间内全部收信账号，同步 INBOX 与「已发送」两个文件夹
+  /// （各自独立游标、单文件夹失败不中断），按时间倒序合并。
   ///
   /// [fullResync] 为 true 时忽略缓存全量重建（手动"完全刷新"）；
   /// 缓存超过 24 小时未全量也会自动走全量，顺带清理服务器已删邮件的残留。
   Future<void> refresh({bool fullResync = false}) async {
     final space = ref.read(currentSpaceProvider).space;
     if (space == null || space.accounts.isEmpty) {
-      _set(const InboxState(
-          error: '请先在「空间」页创建空间并配置邮箱账号', refreshed: true));
+      _setDerived(const [],
+          error: '请先在「空间」页创建空间并配置邮箱账号', refreshed: true);
       return;
     }
     final receivers = space.receiveAccounts;
     if (receivers.isEmpty) {
-      _set(const InboxState(error: '当前空间没有开启收信的账号', refreshed: true));
+      _setDerived(state.messages,
+          error: '当前空间没有开启收信的账号', refreshed: true);
       return;
     }
     // 冷启动竞态防护：等钥匙串密码读入内存，再判断配置完整性。
     await ref.read(secretsProvider.notifier).ready;
     final secrets = ref.read(secretsProvider);
-    _set(InboxState(messages: state.messages, loading: true, refreshed: true));
+    _setDerived(state.messages, loading: true, refreshed: true);
     final addresses = space.accountAddresses;
     final store = InboxCacheStore(spaceId: space.id);
     final all = <EmailSummary>[];
@@ -799,99 +829,145 @@ class InboxController extends Notifier<InboxState> {
       final forceFull = fullResync ||
           (cached != null &&
               DateTime.now().difference(cached.fetchedAt).inHours >= 24);
-      try {
-        final result = await mail.fetchIncremental(
-          limit: 50,
-          accountId: account.id,
-          spaceAddresses: addresses,
-          cachedUidValidity: forceFull ? null : cached?.uidValidity,
-          cachedLastUid: forceFull ? null : cached?.lastUid,
-          cachedMessages: forceFull ? const [] : cached?.messages ?? const [],
-        );
-        if (result.fullResync) {
-          debugPrint(
-              '[inbox] ${account.email} 全量同步 ${result.messages.length} 封');
-        }
-        all.addAll(result.messages);
+      final accountMessages = <EmailSummary>[];
+      var inboxCursor = forceFull ? null : cached?.inboxCursor;
+      var sentCursor = forceFull ? null : cached?.sentCursor;
+      for (final role in const ['INBOX', 'Sent']) {
+        final isSent = role != 'INBOX';
+        final cursor = isSent ? sentCursor : inboxCursor;
+        // 缓存按 folder 拆给对应文件夹（旧缓存只有 INBOX，Sent 首次走全量）。
+        final cachedFolderMessages =
+            (cached?.messages ?? const <EmailSummary>[])
+                .where((m) =>
+                    isSent ? m.folder != 'INBOX' : m.folder == 'INBOX')
+                .toList();
         try {
-          await store.save(
-            account.id,
-            InboxCacheEntry(
-              messages: result.messages,
-              uidValidity: result.uidValidity,
-              lastUid: result.lastUid,
-            ),
+          final result = await mail.fetchIncremental(
+            folder: role,
+            limit: 50,
+            accountId: account.id,
+            spaceAddresses: addresses,
+            cachedUidValidity: forceFull ? null : cursor?.uidValidity,
+            cachedLastUid: forceFull ? null : cursor?.lastUid,
+            cachedMessages: forceFull ? const [] : cachedFolderMessages,
           );
+          if (result.fullResync) {
+            debugPrint('[inbox] ${account.email} $role'
+                ' 全量同步 ${result.messages.length} 封');
+          }
+          accountMessages.addAll(result.messages);
+          final newCursor = FolderCursor(
+              uidValidity: result.uidValidity, lastUid: result.lastUid);
+          if (isSent) {
+            sentCursor = newCursor;
+          } else {
+            inboxCursor = newCursor;
+          }
+        } on FolderNotFoundException {
+          // 服务器没有已发送文件夹（少见）：提示并跳过，不影响收件。
+          if (isSent) {
+            errors.add('${account.email}：未找到已发送文件夹，已跳过');
+            accountMessages.addAll(cachedFolderMessages);
+          }
         } catch (e) {
-          debugPrint('[inbox] 写缓存失败 ${account.email}：$e');
-        }
-      } catch (e) {
-        // 同步失败但缓存有数据：保留缓存展示，离线不清空列表。
-        if (cached != null && cached.messages.isNotEmpty) {
-          all.addAll(cached.messages);
-          errors.add('${account.email}：同步失败（展示缓存）：$e');
-        } else {
-          errors.add('${account.email}：$e');
+          // 同步失败但缓存有数据：保留缓存展示，离线不清空列表。
+          if (cachedFolderMessages.isNotEmpty) {
+            accountMessages.addAll(cachedFolderMessages);
+            errors.add('${account.email} $role：同步失败（展示缓存）：$e');
+          } else {
+            errors.add('${account.email} $role：$e');
+          }
         }
       }
+      all.addAll(accountMessages);
+      try {
+        await store.save(
+          account.id,
+          InboxCacheEntry(
+            messages: accountMessages,
+            inboxCursor: inboxCursor,
+            sentCursor: sentCursor,
+          ),
+        );
+      } catch (e) {
+        debugPrint('[inbox] 写缓存失败 ${account.email}：$e');
+      }
     }
-    all.sort((a, b) =>
-        (b.parsedDate ?? DateTime(2000)).compareTo(a.parsedDate ?? DateTime(2000)));
+    all.sort((a, b) => (b.parsedDate ?? DateTime(2000))
+        .compareTo(a.parsedDate ?? DateTime(2000)));
     try {
       await store.prune(receivers.map((a) => a.id).toSet());
     } catch (e) {
       debugPrint('[inbox] 清理失效缓存失败：$e');
     }
-    _set(InboxState(
-      messages: all,
-      error: errors.isEmpty ? null : '部分账号拉取失败：${errors.join('；')}',
-      refreshed: true,
-    ));
+    _setDerived(all,
+        error: errors.isEmpty ? null : errors.join('；'), refreshed: true);
   }
 
-  Future<void> select(EmailSummary? email) async {
-    if (email == null) {
-      _set(InboxState(
-          messages: state.messages, refreshed: state.refreshed));
-      return;
-    }
-    _set(InboxState(
-      messages: state.messages,
-      selected: email,
-      loading: true,
-      refreshed: state.refreshed,
-    ));
-    final space = ref.read(currentSpaceProvider).space;
-    final account = space?.accountById(email.accountId);
-    if (account == null) {
-      _set(InboxState(
-          messages: state.messages,
-          selected: email,
-          refreshed: state.refreshed));
-      return;
-    }
-    final pwd = ref.read(secretsProvider).mailPasswords[account.id];
-    final mail = MailService(account, pwd);
+  /// 选中会话；默认选最新一封对方来件，便于直接生成草稿。
+  void selectConversation(Conversation conversation) {
+    _setDerived(state.messages,
+        selectedKey: conversation.key, conversationSwitched: true);
+  }
+
+  /// 选中会话内某封邮件（气泡点击），生成草稿作用于它。
+  void selectMessage(EmailSummary email) {
+    _setDerived(state.messages, selectedMessage: email);
+  }
+
+  /// 由邮件列表重算会话并写入状态。选中参数缺省时沿用当前选中：
+  /// 刷新后会话被清掉则清空选中、选中邮件被清掉则回退当前会话最新来件，
+  /// 保证刷新 / 离线兜底数据到来时选中不跳变。
+  void _setDerived(
+    List<EmailSummary> messages, {
+    bool loading = false,
+    String? error,
+    bool? refreshed,
+    String? selectedKey,
+    bool conversationSwitched = false,
+    EmailSummary? selectedMessage,
+  }) {
     try {
-      final peers = await mail.fetchThreadPeers(email);
-      _set(InboxState(
-        messages: state.messages,
-        selected: email,
-        threadPeers: peers,
-        refreshed: state.refreshed,
-      ));
+      final space = ref.read(currentSpaceProvider).space;
+      final conversations = groupConversations(
+          messages, space?.accountAddresses ?? const <String>{});
+      if (!conversationSwitched) selectedKey ??= state.selectedKey;
+      Conversation? sel;
+      for (final c in conversations) {
+        if (c.key == selectedKey) {
+          sel = c;
+          break;
+        }
+      }
+      if (sel == null) selectedKey = null;
+      if (selectedMessage == null) {
+        selectedMessage = conversationSwitched
+            ? sel?.latestIncoming
+            : state.selectedMessage;
+        if (!conversationSwitched && selectedMessage != null) {
+          // 刷新后原选中邮件可能被截断/删除，回退到当前会话最新来件。
+          EmailSummary? alive;
+          for (final m in messages) {
+            if (m.messageId == selectedMessage.messageId) {
+              alive = m;
+              break;
+            }
+          }
+          selectedMessage = alive ?? sel?.latestIncoming;
+        }
+      }
+      state = InboxState(
+        messages: messages,
+        conversations: conversations,
+        loading: loading,
+        error: error,
+        selectedKey: selectedKey,
+        selectedMessage: selectedKey == null ? null : selectedMessage,
+        refreshed: refreshed ?? state.refreshed,
+      );
     } catch (_) {
-      _set(InboxState(
-          messages: state.messages,
-          selected: email,
-          refreshed: state.refreshed));
+      // provider 已随空间切换销毁，丢弃本次更新。
     }
-  }
-
-  void _set(InboxState value) {
-    try {
-      state = value;
-    } catch (_) {}
   }
 }
 
@@ -969,12 +1045,20 @@ class DraftsController extends Notifier<DraftsState> {
     state = _copy(generating: true);
     try {
       final inbox = ref.read(inboxProvider);
+      // 同会话的其它往来作为线程上下文：本地缓存即有，替代原服务器
+      // threadKey 拉取，且与聊天视图的参与人归组语义一致。
+      final peers = <EmailSummary>[];
+      for (final c in inbox.conversations) {
+        if (c.messages.any((m) => m.messageId == email.messageId)) {
+          peers.addAll(c.messages.where((m) => m.messageId != email.messageId));
+          break;
+        }
+      }
       final generator = DraftGenerator(llm: llm);
       final result = await generator.generate(
         email: email,
         rules: rulesState.enabled,
-        threadPeers:
-            inbox.selected?.messageId == email.messageId ? inbox.threadPeers : const [],
+        threadPeers: peers,
         outputLanguage: space.outputLanguage,
       );
       final record = DraftRecord(

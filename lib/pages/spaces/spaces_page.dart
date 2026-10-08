@@ -229,6 +229,11 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
   String _llmId = '';
   String _defaultSendId = '';
 
+  /// 学习文件夹名校验结果（保存后异步核对，只提示不阻塞）。
+  List<String> _folderWarnings = const [];
+  String? _folderCheckNote;
+  bool _folderChecking = false;
+
   @override
   void initState() {
     super.initState();
@@ -246,6 +251,9 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
     _learnMonths.text = '${s.learnMonths}';
     _llmId = s.llmProfileId ?? '';
     _defaultSendId = s.defaultSendAccountId ?? '';
+    _folderWarnings = const [];
+    _folderCheckNote = null;
+    _folderChecking = false;
   }
 
   @override
@@ -289,6 +297,8 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('空间设置已保存')));
     }
+    // 保存后异步核对学习文件夹名（不阻塞，结果内联展示）。
+    _validateLearnFolders(space);
   }
 
   @override
@@ -347,8 +357,41 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
 
         // ---------------- 学习偏好 ----------------
         _section(context, title: '学习偏好（按空间）', children: [
-          _textField(_learnFolders, '历史学习文件夹（逗号分隔，默认 Sent）'),
+          _textField(_learnFolders, '历史学习文件夹（逗号分隔，默认 Sent）', helper:
+              '已发送的常见命名（Sent / Sent Messages / Sent Items / 已发送）会自动匹配；'
+              'Gmail 实际为 [Gmail]/Sent Mail，不确定时可点击下方按钮从服务器选取'),
           _textField(_learnMonths, '学习时间范围（近 N 个月）', num: true),
+          if (_folderChecking)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text('正在连接服务器核对学习文件夹名…',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            ),
+          if (_folderWarnings.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final w in _folderWarnings)
+                    Text(w,
+                        style: TextStyle(
+                            fontSize: 12, color: Colors.orange.shade900)),
+                ],
+              ),
+            ),
+          if (!_folderChecking && _folderCheckNote != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                _folderCheckNote!,
+                style: TextStyle(
+                    fontSize: 12,
+                    color: _folderCheckNote!.contains('✓')
+                        ? Colors.green
+                        : Colors.grey),
+              ),
+            ),
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton.icon(
@@ -397,6 +440,44 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
         const SizedBox(height: 32),
       ],
     );
+  }
+
+  /// 保存后异步核对学习文件夹名：对每个配置完整的收信账号 LIST 文件夹，
+  /// 用 matchMailboxName 校验；连不上的账号跳过。只提示、不阻塞保存。
+  Future<void> _validateLearnFolders(MailSpace space) async {
+    if (space.learnFolders.isEmpty) return;
+    final folders = space.learnFolders;
+    final secrets = ref.read(secretsProvider);
+    setState(() => _folderChecking = true);
+    final warnings = <String>[];
+    var checkedAny = false;
+    for (final a in space.receiveAccounts) {
+      final svc = MailService(a, secrets.mailPasswords[a.id]);
+      if (!svc.isReceiveReady) continue;
+      final List<String> serverFolders;
+      try {
+        serverFolders = await svc.listFolders();
+      } catch (_) {
+        continue; // 单账号连不上则跳过，不算校验失败。
+      }
+      checkedAny = true;
+      for (final f in folders) {
+        if (matchMailboxName(serverFolders, f) == null) {
+          final preview = serverFolders.take(8).join('、');
+          warnings.add('${a.email}：「$f」在服务器上不存在'
+              '（现有：$preview'
+              '${serverFolders.length > 8 ? ' 等共 ${serverFolders.length} 个' : ''}）');
+        }
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _folderChecking = false;
+      _folderWarnings = warnings;
+      _folderCheckNote = warnings.isEmpty
+          ? (checkedAny ? '✓ 文件夹名已与服务器核对无误' : '（未能连接服务器核对文件夹名）')
+          : null;
+    });
   }
 
   Future<void> _pickFolders(MailSpace space) async {
@@ -558,7 +639,8 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
     );
   }
 
-  Widget _textField(TextEditingController c, String label, {bool num = false}) =>
+  Widget _textField(TextEditingController c, String label,
+          {bool num = false, String? helper}) =>
       Padding(
         padding: const EdgeInsets.only(bottom: 10),
         child: TextField(
@@ -566,6 +648,7 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
           keyboardType: num ? TextInputType.number : null,
           decoration: InputDecoration(
             labelText: label,
+            helperText: helper,
             border: const OutlineInputBorder(),
             isDense: true,
           ),

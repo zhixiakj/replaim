@@ -10,6 +10,7 @@ EmailSummary _mail({
   int? uid,
   String accountId = 'a1',
   String subject = '主题',
+  String folder = 'INBOX',
 }) =>
     EmailSummary(
       messageId: messageId,
@@ -17,7 +18,7 @@ EmailSummary _mail({
       fromAddress: 'peer@example.com',
       toAddresses: ['me@example.com'],
       date: date,
-      folder: 'INBOX',
+      folder: folder,
       bodyText: '正文 $messageId',
       snippet: '摘要 $messageId',
       inReplyTo: '<prev@example.com>',
@@ -87,19 +88,62 @@ void main() {
         'acc1',
         InboxCacheEntry(
           messages: messages,
-          uidValidity: 12345,
-          lastUid: 100,
+          inboxCursor: const FolderCursor(uidValidity: 12345, lastUid: 100),
           fetchedAt: DateTime(2026, 10, 7, 12),
         ),
       );
       final back = await store.load('acc1');
       expect(back, isNotNull);
-      expect(back!.uidValidity, 12345);
-      expect(back.lastUid, 100);
+      expect(back!.inboxCursor!.uidValidity, 12345);
+      expect(back.inboxCursor!.lastUid, 100);
+      expect(back.sentCursor, isNull);
       expect(back.fetchedAt, DateTime(2026, 10, 7, 12));
       expect(back.messages.length, 2);
       expect(back.messages.first.uid, 100);
       expect(back.messages.first.bodyText, messages.first.bodyText);
+    });
+
+    test('INBOX 与已发送双游标各自独立 round-trip', () async {
+      final store = InboxCacheStore(dir: Directory('${tmp.path}/inbox_cache'));
+      await store.save(
+        'acc1',
+        InboxCacheEntry(
+          messages: [
+            _mail(
+                messageId: '<in@x>',
+                date: '2026-10-07T10:00:00.000',
+                uid: 42,
+                folder: 'INBOX'),
+            _mail(
+                messageId: '<out@x>',
+                date: '2026-10-07T11:00:00.000',
+                uid: 42,
+                folder: '[Gmail]/Sent Mail'),
+          ],
+          inboxCursor: const FolderCursor(uidValidity: 1, lastUid: 42),
+          sentCursor: const FolderCursor(uidValidity: 9, lastUid: 42),
+        ),
+      );
+      final back = await store.load('acc1');
+      expect(back!.inboxCursor, const FolderCursor(uidValidity: 1, lastUid: 42));
+      expect(back.sentCursor, const FolderCursor(uidValidity: 9, lastUid: 42));
+      expect(back.messages.length, 2);
+    });
+
+    test('旧格式（顶层游标，仅 INBOX）迁移为收件游标', () async {
+      final dir = Directory('${tmp.path}/inbox_cache');
+      await dir.create(recursive: true);
+      File('${dir.path}/old.yaml').writeAsStringSync('''
+uid_validity: 12345
+last_uid: 100
+fetched_at: '2026-10-07T12:00:00.000'
+messages: []
+''');
+      final back = await InboxCacheStore(dir: dir).load('old');
+      expect(back, isNotNull);
+      expect(back!.inboxCursor!.uidValidity, 12345);
+      expect(back.inboxCursor!.lastUid, 100);
+      expect(back.sentCursor, isNull);
     });
 
     test('缺失/损坏文件 load 返回 null', () async {
@@ -211,6 +255,29 @@ void main() {
           messageId: '<x@x>', date: '2026-10-05T08:00:00.000',
           uid: 5, accountId: 'a2');
       expect(mergeInboxMessages([a], [b]).length, 2);
+    });
+
+    test('同账号同 UID 但不同文件夹不互撞（INBOX vs 已发送）', () {
+      final inbox = _mail(
+          messageId: '<in@x>', date: '2026-10-05T08:00:00.000',
+          uid: 42, folder: 'INBOX');
+      final sent = _mail(
+          messageId: '<out@x>', date: '2026-10-05T09:00:00.000',
+          uid: 42, folder: '[Gmail]/Sent Mail');
+      final merged = mergeInboxMessages([inbox], [sent]);
+      expect(merged.length, 2);
+      expect(merged.map((m) => m.messageId).toSet(),
+          {'<in@x>', '<out@x>'});
+    });
+
+    test('同账号同文件夹同 UID 仍去重', () {
+      final cached = _mail(
+          messageId: '<old@x>', date: '2026-10-05T08:00:00.000',
+          uid: 7, folder: 'Sent Messages');
+      final fetched = _mail(
+          messageId: '<new@x>', date: '2026-10-05T08:00:00.000',
+          uid: 7, folder: 'Sent Messages');
+      expect(mergeInboxMessages([cached], [fetched]).length, 1);
     });
   });
 }
