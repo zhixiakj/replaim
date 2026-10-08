@@ -74,8 +74,14 @@ class LlmClient {
       'max_tokens': ?maxTokens,
     };
     final data = await _post(body);
-    final content =
-        _firstChoice(data) ?? (throw LlmException('模型未返回任何内容'));
+    final content = _firstChoice(data);
+    if (content == null || content.trim().isEmpty) {
+      final reason = _finishReason(data);
+      throw LlmException(switch (reason) {
+        'length' => '输出被 max_tokens 截断（推理型模型的思考也计入预算），请调大 max tokens',
+        _ => '模型未返回任何内容${reason == null ? '' : '（finish_reason=$reason）'}',
+      });
+    }
     return LlmResult(
       content: content,
       model: (data['model'] as String?) ?? config.model,
@@ -204,6 +210,15 @@ class LlmClient {
         final message = choice['message'];
         if (message is Map) return message['content'] as String?;
       }
+    }
+    return null;
+  }
+
+  static String? _finishReason(Map<String, dynamic> data) {
+    final choices = data['choices'];
+    if (choices is List && choices.isNotEmpty) {
+      final choice = choices.first;
+      if (choice is Map) return choice['finish_reason']?.toString();
     }
     return null;
   }

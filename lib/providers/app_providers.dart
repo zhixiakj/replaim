@@ -1129,10 +1129,18 @@ class DraftsController extends Notifier<DraftsState> {
       return existing.id;
     }
 
-    final rulesState = ref.read(rulesProvider);
+    var rulesState = ref.read(rulesProvider);
+    if (!rulesState.loaded) {
+      // provider 可能刚随启动/切空间重建，规则尚未从磁盘载入：
+      // 先等加载完成再判空，避免把「未加载」误判成「规则库为空」。
+      await ref.read(rulesProvider.notifier).reload();
+      rulesState = ref.read(rulesProvider);
+    }
     if (rulesState.enabled.isEmpty) {
       state = _copy(
-          error: '规则库为空：草稿只能依据回复规则生成，请先在学习中心 / 知识库 / 规则库生成规则');
+          error: rulesState.rules.isEmpty
+              ? '规则库为空：草稿只能依据回复规则生成，请先在学习中心 / 知识库 / 规则库生成规则'
+              : '当前规则全部处于停用状态，请先在规则库启用规则');
       return null;
     }
 

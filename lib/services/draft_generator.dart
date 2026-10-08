@@ -58,7 +58,8 @@ class DraftGenerator {
         )),
       ],
       temperature: 0.4,
-      maxTokens: 1500,
+      // 推理型模型的思考 token 也计入 max_tokens，预算不足时正文会为空
+      maxTokens: 4000,
     );
 
     return DraftGenerationResult(
