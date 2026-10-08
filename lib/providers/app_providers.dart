@@ -508,6 +508,9 @@ class LearnController extends Notifier<LearnRunState> {
       final all = <EmailSummary>[];
       for (final account in usable) {
         final mail = MailService(account, secrets.mailPasswords[account.id]);
+        // 发件侧（learnFolders）：既是学习材料，也是来信配对的锚点
+        //（含已消费的发件——配对只认引用关系，与是否学过无关）。
+        final accountSent = <EmailSummary>[];
         for (final folder in space.learnFolders) {
           _set(LearnRunState(
               running: true,
@@ -520,14 +523,37 @@ class LearnController extends Notifier<LearnRunState> {
                 folder: folder,
                 limit: space.learnMaxPerFolder,
                 accountId: account.id);
-            all.addAll(list.where((e) =>
-                (e.parsedDate ?? DateTime(2000)).isAfter(since) &&
-                !learnState.hasConsumed(e.messageId)));
+            accountSent.addAll(list);
           } catch (e) {
             failed.add('${account.email}/$folder');
             failedDetails.add('${account.email} / $folder：$e');
           }
         }
+        // 收件侧：拉收件箱，只保留与发件同线程的来信（问→答配对学习）。
+        _set(LearnRunState(
+            running: true,
+            progress: '正在拉取 ${account.email} 的 INBOX（配对客户来信）…',
+            consumedCount: learnState.consumed.length,
+            lastRunAt: learnState.lastRunAt));
+        List<EmailSummary> accountInbox = const [];
+        try {
+          accountInbox = await mail.fetchRecent(
+              folder: 'INBOX',
+              limit: space.learnMaxPerFolder,
+              accountId: account.id);
+        } catch (e) {
+          failed.add('${account.email}/INBOX');
+          failedDetails.add('${account.email} / INBOX：$e');
+        }
+        final pairedInbox =
+            pairIncomingWithSent(sent: accountSent, inbox: accountInbox);
+        // 学习集合 = 发件 + 配对来信；仍要求时间范围内、未消费过，按 messageId 去重。
+        final seen = <String>{};
+        all.addAll([...accountSent, ...pairedInbox].where((e) =>
+            (e.parsedDate ?? DateTime(2000)).isAfter(since) &&
+            !learnState.hasConsumed(e.messageId) &&
+            e.messageId.isNotEmpty &&
+            seen.add(e.messageId)));
       }
       final failedNote = failed.isEmpty
           ? ''
@@ -556,7 +582,8 @@ class LearnController extends Notifier<LearnRunState> {
         };
       final result = await generator.generateFromEmails(
         all,
-        folders: space.learnFolders,
+        folders: [...space.learnFolders, 'INBOX'],
+        spaceAddresses: space.accountAddresses,
       );
 
       // 记录已消费邮件（避免重复使用）。
@@ -591,6 +618,12 @@ class LearnController extends Notifier<LearnRunState> {
           failedFolders: failedDetails,
           error: '学习失败：$e'));
     }
+  }
+
+  /// 清空学习记录：下次学习会重新读取全部历史邮件（已生成的规则不受影响）。
+  Future<void> resetLearning() async {
+    await _store.reset();
+    _set(const LearnRunState());
   }
 
   void _set(LearnRunState value) {
@@ -914,6 +947,67 @@ class InboxController extends Notifier<InboxState> {
   void selectMessage(EmailSummary email) {
     _setDerived(state.messages, selectedMessage: email);
   }
+
+  /// 已尝试过按需补取详情的邮件（storageKey），每封最多尝试一次，
+  /// 避免弹窗反复打开时反复建连。
+  final Set<String> _detailsAttempted = {};
+
+  /// 详情弹窗按需补取：老缓存邮件缺 cc / 发信认证信息时按 UID 现拉一次。
+  ///
+  /// 增量同步只处理新 UID，模型扩展之前落盘的旧邮件不会再经过 _toSummary，
+  /// 因此在弹窗打开时单封补取；成功后同步更新内存状态与磁盘缓存（游标不动），
+  /// 下次冷启动弹窗即有完整信息。失败静默（弹窗继续展示缓存内容）。
+  Future<void> ensureDetails(EmailSummary email) async {
+    if (email.uid == null || !_lacksDetails(email)) return;
+    final key = email.storageKey;
+    if (!_detailsAttempted.add(key)) return;
+    try {
+      final space = ref.read(currentSpaceProvider).space;
+      final account = space?.accountById(email.accountId);
+      if (space == null || account == null) return;
+      // await 之后 provider 可能已随空间切换销毁，后续读取都由外层 catch 兜底。
+      await ref.read(secretsProvider.notifier).ready;
+      final pwd = ref.read(secretsProvider).mailPasswords[account.id];
+      final svc = MailService(account, pwd);
+      if (!svc.isReceiveReady) return;
+      final updated = await svc.fetchByUid(
+        folder: email.folder,
+        uid: email.uid!,
+        accountId: email.accountId,
+        spaceAddresses: space.accountAddresses,
+      );
+      if (updated == null || _lacksDetails(updated)) return;
+      _setDerived([
+        for (final m in state.messages)
+          if (m.storageKey == key) updated else m,
+      ]);
+      try {
+        final entry = await _cacheStore.load(updated.accountId);
+        if (entry != null) {
+          await _cacheStore.save(
+              updated.accountId,
+              InboxCacheEntry(
+                messages: [
+                  for (final m in entry.messages)
+                    if (m.storageKey == key) updated else m,
+                ],
+                inboxCursor: entry.inboxCursor,
+                sentCursor: entry.sentCursor,
+                fetchedAt: entry.fetchedAt,
+              ));
+        }
+      } catch (e) {
+        debugPrint('[inbox] 详情回写缓存失败：$e');
+      }
+    } catch (_) {
+      // 离线 / 服务器失败 / 空间已切换：弹窗继续展示缓存信息，不重试。
+    }
+  }
+
+  /// cc 与发信认证信息全空视为缺详情（真实邮件几乎都带 Authentication-Results，
+  /// 全空基本等于模型扩展之前落盘的老缓存）。
+  bool _lacksDetails(EmailSummary m) =>
+      m.ccAddresses.isEmpty && m.mailedBy.isEmpty && m.signedBy.isEmpty;
 
   /// 由邮件列表重算会话并写入状态。选中参数缺省时沿用当前选中：
   /// 刷新后会话被清掉则清空选中、选中邮件被清掉则回退当前会话最新来件，

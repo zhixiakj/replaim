@@ -7,8 +7,9 @@ import '../../providers/app_providers.dart';
 import '../drafts/draft_edit_page.dart';
 
 /// 收件箱（聊天式）：左侧为按「发件人 × 收件人」参与人集合汇总的会话列表，
-/// 右侧以聊天气泡展示会话往来 —— 对方来信靠左、本空间发出的邮件靠右，
-/// 收到的与发出的邮件合并进同一会话。
+/// 收到的与发出的邮件合并进同一会话（不按方向分段），已回复的会话标记
+/// 「已回」（最新来件之后已有我方发出）；
+/// 右侧以聊天气泡展示会话往来 —— 对方来信靠左、本空间发出的邮件靠右。
 class InboxPage extends ConsumerStatefulWidget {
   const InboxPage({super.key});
 
@@ -17,6 +18,8 @@ class InboxPage extends ConsumerStatefulWidget {
 }
 
 class _InboxPageState extends ConsumerState<InboxPage> {
+  final _listScrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
@@ -25,6 +28,12 @@ class _InboxPageState extends ConsumerState<InboxPage> {
         ref.read(inboxProvider.notifier).refresh();
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _listScrollController.dispose();
+    super.dispose();
   }
 
   @override
@@ -43,7 +52,7 @@ class _InboxPageState extends ConsumerState<InboxPage> {
                 padding: const EdgeInsets.all(12),
                 child: Row(
                   children: [
-                    Text('收件箱', style: Theme.of(context).textTheme.titleLarge),
+                    Text('邮件列表', style: Theme.of(context).textTheme.titleLarge),
                     const Spacer(),
                     if (state.loading)
                       const SizedBox(
@@ -79,18 +88,22 @@ class _InboxPageState extends ConsumerState<InboxPage> {
               Expanded(
                 child: state.conversations.isEmpty && !state.loading
                     ? const Center(child: Text('暂无邮件，请先在空间中配置账号并刷新'))
-                    : ListView.builder(
-                        itemCount: state.conversations.length,
-                        itemBuilder: (context, i) {
-                          final conv = state.conversations[i];
-                          return _ConversationTile(
-                            conversation: conv,
-                            selected: selected?.key == conv.key,
-                            onTap: () => ref
-                                .read(inboxProvider.notifier)
-                                .selectConversation(conv),
-                          );
-                        },
+                    : Scrollbar(
+                        controller: _listScrollController,
+                        child: ListView.builder(
+                          controller: _listScrollController,
+                          itemCount: state.conversations.length,
+                          itemBuilder: (context, i) {
+                            final conv = state.conversations[i];
+                            return _ConversationTile(
+                              conversation: conv,
+                              selected: selected?.key == conv.key,
+                              onTap: () => ref
+                                  .read(inboxProvider.notifier)
+                                  .selectConversation(conv),
+                            );
+                          },
+                        ),
                       ),
               ),
             ],
@@ -114,6 +127,18 @@ String _formatShortDate(DateTime? date) {
   final hh = date.hour.toString().padLeft(2, '0');
   final mi = date.minute.toString().padLeft(2, '0');
   return '$mm-$dd $hh:$mi';
+}
+
+/// 详情弹窗用的完整时间：2026-10-08（周三）14:32。
+String _formatFullDate(DateTime? date) {
+  if (date == null) return '';
+  const weekdays = ['一', '二', '三', '四', '五', '六', '日'];
+  final y = date.year.toString().padLeft(4, '0');
+  final mm = date.month.toString().padLeft(2, '0');
+  final dd = date.day.toString().padLeft(2, '0');
+  final hh = date.hour.toString().padLeft(2, '0');
+  final mi = date.minute.toString().padLeft(2, '0');
+  return '$y-$mm-$dd（周${weekdays[date.weekday - 1]}）$hh:$mi';
 }
 
 /// 头像底色：按参与人串做稳定散列取色相，同一会话跨重启颜色不变
@@ -144,45 +169,91 @@ class _ConversationTile extends StatelessWidget {
         ? '（本空间内部往来）'
         : conversation.participants.join('、');
     final snippet = last.snippet.isEmpty ? '（无正文）' : last.snippet;
-    return ListTile(
-      selected: selected,
-      onTap: onTap,
-      leading: CircleAvatar(
-        radius: 18,
-        backgroundColor: _avatarColor(conversation.key),
-        child: Text(
-          title.isEmpty ? '?' : title[0].toUpperCase(),
-          style: const TextStyle(
-              color: Colors.white, fontWeight: FontWeight.w600, fontSize: 15),
+    return ListTileTheme(
+      data: ListTileThemeData(
+        selectedColor: Theme.of(context).colorScheme.onPrimaryContainer,
+        selectedTileColor: Theme.of(context).colorScheme.primaryContainer,
+      ),
+      child: ListTile(
+        selected: selected,
+        onTap: onTap,
+        leading: CircleAvatar(
+          radius: 18,
+          backgroundColor: _avatarColor(conversation.key),
+          child: Text(
+            title.isEmpty ? '?' : title[0].toUpperCase(),
+            style: const TextStyle(
+                color: Colors.white, fontWeight: FontWeight.w600, fontSize: 15),
+          ),
+        ),
+        title: Row(
+          children: [
+            if (conversation.hasForwarded) ...[
+              Tooltip(
+                message: '会话中含转发邮件，原始收件不在本空间账号内',
+                child: Icon(Icons.forward_to_inbox,
+                    size: 16, color: Colors.orange.shade800),
+              ),
+              const SizedBox(width: 4),
+            ],
+            Expanded(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+            if (conversation.replied) ...[
+              const SizedBox(width: 6),
+              _ReplyBadge(
+                label: '已回',
+                background: Colors.green.shade100,
+                color: Colors.green.shade900,
+              ),
+            ],
+          ],
+        ),
+        subtitle: Text(
+          conversation.lastFromMe ? '我：$snippet' : snippet,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: Text(_formatShortDate(last.parsedDate),
+            style: Theme.of(context).textTheme.bodySmall),
+      ),
+    );
+  }
+}
+
+/// 会话列表上的回复状态小徽章（待回 / 已回）。
+class _ReplyBadge extends StatelessWidget {
+  const _ReplyBadge({
+    required this.label,
+    required this.background,
+    required this.color,
+  });
+
+  final String label;
+  final Color background;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: color,
         ),
       ),
-      title: Row(
-        children: [
-          if (conversation.hasForwarded) ...[
-            Tooltip(
-              message: '会话中含转发邮件，原始收件不在本空间账号内',
-              child: Icon(Icons.forward_to_inbox,
-                  size: 16, color: Colors.orange.shade800),
-            ),
-            const SizedBox(width: 4),
-          ],
-          Expanded(
-            child: Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
-      ),
-      subtitle: Text(
-        conversation.lastFromMe ? '我：$snippet' : snippet,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      trailing: Text(_formatShortDate(last.parsedDate),
-          style: Theme.of(context).textTheme.bodySmall),
     );
   }
 }
@@ -337,17 +408,23 @@ class _ChatDetailState extends ConsumerState<_ChatDetail> {
                       if (!fromMe)
                         Padding(
                           padding: const EdgeInsets.only(left: 4, bottom: 2),
-                          child: Text(
-                            m.fromAddress,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant),
+                          child: MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            child: GestureDetector(
+                              onTap: () => _showEmailDetails(context, m),
+                              child: Text(
+                                m.fromAddress,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant),
+                              ),
+                            ),
                           ),
                         ),
                       _MessageBubble(
@@ -492,20 +569,211 @@ class _MessageBubble extends StatelessWidget {
                 style: const TextStyle(height: 1.5, fontSize: 14),
               ),
               const SizedBox(height: 4),
+              // Gmail 式「to me ▾」：meta 行整体 + 下拉箭头打开邮件详情弹窗。
+              // 箭头在气泡内，外层 Listener 仍会先选中气泡，两者语义兼容。
               Align(
                 alignment: Alignment.centerRight,
-                child: Text(
-                  '${_formatShortDate(email.parsedDate)} · '
-                  '${fromMe ? '经 $accountEmail 发出' : '收信 $accountEmail'}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: scheme.onSurfaceVariant,
+                child: Tooltip(
+                  message: '邮件详情',
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => _showEmailDetails(context, email),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '${_formatShortDate(email.parsedDate)} · '
+                          '${fromMe ? '经 $accountEmail 发出' : '收信 $accountEmail'}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                        Icon(Icons.expand_more,
+                            size: 15, color: scheme.onSurfaceVariant),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+Future<void> _showEmailDetails(BuildContext context, EmailSummary email) =>
+    showDialog(
+      context: context,
+      builder: (_) => _EmailDetailsDialog(email: email),
+    );
+
+/// Gmail 风格的邮件详情弹窗：from / to / cc / date / mailed-by / signed-by。
+///
+/// 正文区整体 SelectionArea 包裹，所有文字可拖选复制；mailed-by / signed-by
+/// 仅在 Authentication-Results 推导出域名时显示。老缓存邮件缺这些字段时，
+/// 打开瞬间按 UID 现拉补取（ensureDetails），补到后 watch 自动刷新。
+class _EmailDetailsDialog extends ConsumerStatefulWidget {
+  const _EmailDetailsDialog({required this.email});
+
+  final EmailSummary email;
+
+  @override
+  ConsumerState<_EmailDetailsDialog> createState() =>
+      _EmailDetailsDialogState();
+}
+
+class _EmailDetailsDialogState extends ConsumerState<_EmailDetailsDialog> {
+  bool _attemptDone = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.email;
+    if (e.uid != null &&
+        e.ccAddresses.isEmpty &&
+        e.mailedBy.isEmpty &&
+        e.signedBy.isEmpty) {
+      ref
+          .read(inboxProvider.notifier)
+          .ensureDetails(e)
+          .whenComplete(() {
+        if (mounted) setState(() => _attemptDone = true);
+      });
+    }
+  }
+
+  /// 弹窗期间状态里的最新副本（补取成功后 storageKey 相同、字段更全）。
+  EmailSummary _liveOf(List<EmailSummary> messages) {
+    final key = widget.email.storageKey;
+    for (final m in messages) {
+      if (m.storageKey == key) return m;
+    }
+    return widget.email;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final email = _liveOf(ref.watch(inboxProvider).messages);
+    final pending = email.uid != null &&
+        email.ccAddresses.isEmpty &&
+        email.mailedBy.isEmpty &&
+        email.signedBy.isEmpty;
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 12, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: SelectableText(
+                        email.subject,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 20),
+                    tooltip: '关闭',
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              SelectionArea(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _DetailRow(label: 'from', value: email.fromAddress),
+                    _DetailRow(
+                        label: 'to', value: email.toAddresses.join(', ')),
+                    if (email.ccAddresses.isNotEmpty)
+                      _DetailRow(
+                          label: 'cc', value: email.ccAddresses.join(', ')),
+                    _DetailRow(
+                        label: 'date',
+                        value: _formatFullDate(email.parsedDate)),
+                    if (email.mailedBy.isNotEmpty)
+                      _DetailRow(label: 'mailed-by', value: email.mailedBy),
+                    if (email.signedBy.isNotEmpty)
+                      _DetailRow(label: 'signed-by', value: email.signedBy),
+                  ],
+                ),
+              ),
+              if (pending) ...[
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    if (!_attemptDone) ...[
+                      const SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(strokeWidth: 2)),
+                      const SizedBox(width: 8),
+                    ],
+                    Text(
+                      _attemptDone
+                          ? '未获取到发件认证信息（该邮件可能未提供，或网络不可用）'
+                          : '正在获取发件认证信息…',
+                      style: TextStyle(
+                          fontSize: 11.5, color: scheme.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// label 固定宽度 + 值可换行的详情行；值处于 SelectionArea 内，可选中复制。
+class _DetailRow extends StatelessWidget {
+  const _DetailRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 7),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 86,
+            child: Text(label,
+                style:
+                    TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+          ),
+          Expanded(
+            child: Text(
+              value.isEmpty ? '（空）' : value,
+              style: const TextStyle(fontSize: 13, height: 1.45),
+            ),
+          ),
+        ],
       ),
     );
   }

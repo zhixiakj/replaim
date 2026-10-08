@@ -2,10 +2,12 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:replaim/models/draft_record.dart';
+import 'package:replaim/models/email_summary.dart';
 import 'package:replaim/models/learn_state.dart';
 import 'package:replaim/models/rule.dart';
 import 'package:replaim/services/feedback_learner.dart';
 import 'package:replaim/services/json_extract.dart';
+import 'package:replaim/services/rule_generators.dart';
 import 'package:replaim/services/rule_store.dart';
 import 'package:replaim/services/stores.dart';
 import 'package:replaim/services/yaml_io.dart';
@@ -213,6 +215,27 @@ void main() {
       expect(store2.state.consumed.first.generatedRuleIds,
           ['rule_1', 'rule_2']);
     });
+
+    test('reset 清空消费记录与上次学习时间', () async {
+      final store = LearnStateStore(file: File('${tmp.path}/learn.yaml'));
+      await store.recordRun([
+        ConsumedEmail(
+          messageId: '<1@x>',
+          date: '2026-01-01',
+          subject: 'S',
+          from: 'a@b.c',
+          folder: 'Sent',
+          learnedAt: '2026-10-07',
+          generatedRuleIds: const ['rule_1'],
+        ),
+      ]);
+      await store.reset();
+      final store2 = LearnStateStore(file: File('${tmp.path}/learn.yaml'));
+      await store2.load();
+      expect(store2.state.consumed, isEmpty);
+      expect(store2.state.lastRunAt, isNull);
+      expect(store2.state.hasConsumed('<1@x>'), isFalse);
+    });
   });
 
   group('DraftStore', () {
@@ -264,6 +287,128 @@ void main() {
     test('无差异输出占位', () {
       final s = FeedbackLearner.diffSummary('same', 'same');
       expect(s, contains('无文本差异'));
+    });
+  });
+
+  group('收发配对学习', () {
+    EmailSummary mail({
+      required String messageId,
+      String subject = 'Hello',
+      String from = 'buyer@x.com',
+      List<String> references = const [],
+      String? inReplyTo,
+      String folder = 'INBOX',
+    }) =>
+        EmailSummary(
+          messageId: messageId,
+          subject: subject,
+          fromAddress: from,
+          toAddresses: const ['service@shop.com'],
+          date: '2026-01-02T00:00:00',
+          folder: folder,
+          referencesIds: references,
+          inReplyTo: inReplyTo,
+        );
+
+    test('References 命中：来信被配对保留', () {
+      final sent = [
+        mail(messageId: '<b@x>', references: ['<a@x>'], folder: 'Sent')
+      ];
+      final inbox = [mail(messageId: '<a@x>')];
+      final paired = pairIncomingWithSent(sent: sent, inbox: inbox);
+      expect(paired.map((e) => e.messageId), ['<a@x>']);
+    });
+
+    test('In-Reply-To 命中：来信被配对保留', () {
+      final sent = [
+        mail(messageId: '<b@x>', inReplyTo: '<q@x>', folder: 'Sent')
+      ];
+      final inbox = [mail(messageId: '<q@x>')];
+      expect(pairIncomingWithSent(sent: sent, inbox: inbox).length, 1);
+    });
+
+    test('无对应发件的来信（订阅/通知）被丢弃', () {
+      final sent = [
+        mail(messageId: '<b@x>', references: ['<a@x>'], folder: 'Sent')
+      ];
+      final inbox = [
+        mail(messageId: '<a@x>'),
+        mail(messageId: '<noise@x>', subject: 'Newsletter'),
+      ];
+      final paired = pairIncomingWithSent(sent: sent, inbox: inbox);
+      expect(paired.map((e) => e.messageId), ['<a@x>']);
+    });
+
+    test('无引用头的发件按归一化主题兜底配对', () {
+      final sent = [
+        mail(messageId: '<b@x>', subject: 'Re: Refund', folder: 'Sent')
+      ];
+      final inbox = [mail(messageId: '<q@x>', subject: 'Refund')];
+      expect(pairIncomingWithSent(sent: sent, inbox: inbox).length, 1);
+    });
+
+    test('规范线程键：线程根与回复同键（问/答进同一线程组）', () {
+      final root = mail(messageId: '<a@x>'); // 客户来信，无引用头
+      final reply =
+          mail(messageId: '<b@x>', references: ['<a@x>'], folder: 'Sent');
+      expect(canonicalThreadKey(root), canonicalThreadKey(reply));
+      // threadKey getter 在此场景下键不一致（主题 vs Message-ID），正是要绕开的。
+      expect(root.threadKey, isNot(reply.threadKey));
+    });
+
+    test('toLearningText 标注我方/客户角色', () {
+      const ours = {'service@shop.com'};
+      final buyer = mail(messageId: '<a@x>').toLearningText(ours);
+      final seller = mail(
+        messageId: '<b@x>',
+        from: 'Service@Shop.com',
+        folder: 'Sent',
+      ).toLearningText(ours);
+      expect(buyer, contains('角色: 客户'));
+      expect(seller, contains('角色: 我方'));
+    });
+  });
+
+  group('parseRuleItems', () {
+    test('已解码 List（chatJson 实际返回形态，本次 bug 场景）', () {
+      final items = RuleGenerators.parseRuleItems([
+        {'category': 'tone', 'content': '退款先致歉再给方案', 'reason': '多条邮件一致'},
+      ]);
+      expect(items.length, 1);
+      expect(items.first.content, '退款先致歉再给方案');
+      expect(items.first.category, RuleCategory.tone);
+    });
+
+    test('{"rules": [...]} 对象兜底', () {
+      final items = RuleGenerators.parseRuleItems({
+        'rules': [
+          {'category': 'format', 'content': '落款固定用 Best regards'},
+        ],
+      });
+      expect(items.first.content, '落款固定用 Best regards');
+    });
+
+    test('原始 JSON 字符串兼容', () {
+      final items = RuleGenerators.parseRuleItems(
+          '[{"category":"policy","content":"物流延误主动给时效"}]');
+      expect(items.first.category, RuleCategory.policy);
+    });
+
+    test('字段名漂移（rule/text）与短内容过滤', () {
+      final items = RuleGenerators.parseRuleItems([
+        {'rule': '开头称呼用 Hi'},
+        {'text': 'abc'}, // <4 字符，丢弃
+      ]);
+      expect(items.length, 1);
+      expect(items.first.content, '开头称呼用 Hi');
+    });
+
+    test('非法输入抛 FormatException（不再静默吞掉）', () {
+      expect(() => RuleGenerators.parseRuleItems(42), throwsFormatException);
+      expect(() => RuleGenerators.parseRuleItems('完全不是 JSON'),
+          throwsFormatException);
+      expect(() => RuleGenerators.parseRuleItems({'summary': 'x'}),
+          throwsFormatException);
     });
   });
 }

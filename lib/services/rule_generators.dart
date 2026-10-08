@@ -1,9 +1,47 @@
+import 'package:flutter/foundation.dart';
+
 import '../models/email_summary.dart';
 import '../models/rule.dart';
 import 'json_extract.dart';
 import 'llm_client.dart';
 import 'prompts.dart' as prompts;
 import 'rule_store.dart';
+
+/// 学习路径的规范线程键：回复取 References 链根 Message-ID，
+/// 线程根（无引用头）取自身 Message-ID——两者天然一致。
+/// 不用 [EmailSummary.threadKey]：它对线程根会退化成归一化主题，
+/// 与回复的键对不上，导致客户来信与我方回复被拆进不同线程/批次。
+String canonicalThreadKey(EmailSummary e) {
+  final root = e.referencesIds.isNotEmpty ? e.referencesIds.first : e.inReplyTo;
+  if (root != null && root.isNotEmpty) return root;
+  return e.messageId.isNotEmpty ? e.messageId : e.normalizedSubject;
+}
+
+/// 收发配对：从收件箱邮件中只保留与任一发件同线程的来信（问→答成对学习）。
+///
+/// 匹配依据：来信 Message-ID 出现在发件的 References/In-Reply-To 中；
+/// 发件缺引用头时回落到归一化主题相等（部分客户端只靠主题串线程）。
+/// 订阅、通知等没有对应发件的来信全部丢弃。
+List<EmailSummary> pairIncomingWithSent({
+  required List<EmailSummary> sent,
+  required List<EmailSummary> inbox,
+}) {
+  final referencedIds = <String>{};
+  final subjectFallbacks = <String>{};
+  for (final s in sent) {
+    referencedIds.addAll(s.referencesIds);
+    final irt = s.inReplyTo;
+    if (irt != null && irt.isNotEmpty) referencedIds.add(irt);
+    if (s.referencesIds.isEmpty && (irt == null || irt.isEmpty)) {
+      subjectFallbacks.add(s.normalizedSubject);
+    }
+  }
+  return inbox
+      .where((m) =>
+          referencedIds.contains(m.messageId) ||
+          subjectFallbacks.contains(m.normalizedSubject))
+      .toList();
+}
 
 /// 规则生成器：三个来源（历史邮件 / 知识库 / 用户 prompt）+ 合并策略。
 ///
@@ -27,10 +65,12 @@ class RuleGenerators {
   /// 1) 历史邮件 → 规则（增量）。
   ///
   /// [emails] 必须是已过滤（未消费）、已排序的邮件集合；
+  /// [spaceAddresses] 用于在材料中标注「我方/客户」角色（小写地址集合）。
   /// 返回本次消费记录（含每封邮件参与生成的规则 ID）。
   Future<EmailLearningResult> generateFromEmails(
     List<EmailSummary> emails, {
     required List<String> folders,
+    required Set<String> spaceAddresses,
   }) async {
     final newRulesTotal = <Rule>[];
     final consumedMap = <String, List<String>>{}; // messageId -> ruleIds
@@ -43,11 +83,22 @@ class RuleGenerators {
       onProgress?.call('正在分析第 ${i + 1}/${batches.length} 批往来邮件',
           i + 1, batches.length);
       final dateRange = _dateRangeText(batch);
-      final batchText = batch.map((e) => e.toLearningText()).join('\n');
+      var incomingCount = 0;
+      for (final e in batch) {
+        if (!spaceAddresses.contains(e.fromAddress.trim().toLowerCase())) {
+          incomingCount++;
+        }
+      }
+      debugPrint('[learn] 批次 ${i + 1}/${batches.length}：邮件 ${batch.length} 封'
+          '（客户来信 $incomingCount、我方回复 ${batch.length - incomingCount}），'
+          '日期 $dateRange');
+      final batchText =
+          batch.map((e) => e.toLearningText(spaceAddresses)).join('\n');
       final raw = await llm.chatJson([
         LlmMessage.user(prompts.emailRulesPrompt(batchText, dateRange)),
       ]);
-      final extracted = _parseRuleItems(raw);
+      final extracted = parseRuleItems(raw);
+      debugPrint('[learn] 批次 ${i + 1}/${batches.length}：提取 ${extracted.length} 条规则');
       if (extracted.isEmpty) continue;
 
       final messageIds = batch.map((e) => e.messageId).toList();
@@ -72,6 +123,8 @@ class RuleGenerators {
       onProgress?.call(
           '正在合并规则（第 ${i + 1}/${batches.length} 批）', i + 1, batches.length);
       final merged = await mergeBatch(batchRules);
+      debugPrint('[learn] 批次 ${i + 1}/${batches.length}：合并后新增 '
+          '${merged.added.length} 条、更新 ${merged.updatedRuleIds.length} 条');
       final touchedIds = [
         ...merged.added.map((r) => r.id),
         ...merged.updatedRuleIds,
@@ -174,7 +227,7 @@ class RuleGenerators {
       final raw = await llm.chatJson([
         LlmMessage.user(prompts.kbRulesPrompt(docName, chunks[i])),
       ]);
-      for (final item in _parseRuleItems(raw)) {
+      for (final item in parseRuleItems(raw)) {
         rules.add(newRuleFromGeneration(
           type: RuleSourceType.knowledgeBase,
           generatedBy: llm.generatedBy,
@@ -199,7 +252,7 @@ class RuleGenerators {
     final raw = await llm.chatJson([
       LlmMessage.user(prompts.userPromptRulesPrompt(promptText)),
     ]);
-    return _parseRuleItems(raw)
+    return parseRuleItems(raw)
         .map((e) => (e.category, e.content))
         .toList();
   }
@@ -222,10 +275,11 @@ class RuleGenerators {
     final sorted = [...emails]..sort((a, b) =>
         (a.parsedDate ?? DateTime(2000)).compareTo(b.parsedDate ?? DateTime(2000)));
 
-    // 线程聚类：threadKey 相同的排在一起，块内保持时间升序。
+    // 线程聚类：规范键相同的排在一起（客户来信与 我方回复 同线程同批），
+    // 块内保持时间升序。
     final byThread = <String, List<EmailSummary>>{};
     for (final e in sorted) {
-      byThread.putIfAbsent(e.threadKey, () => []).add(e);
+      byThread.putIfAbsent(canonicalThreadKey(e), () => []).add(e);
     }
     final threads = byThread.values.toList()
       ..sort((a, b) => (a.first.parsedDate ?? DateTime(2000))
@@ -261,13 +315,49 @@ class RuleGenerators {
     return '${fmt(dates.first)} ~ ${fmt(dates.last)}';
   }
 
-  List<RuleItem> _parseRuleItems(dynamic raw) {
+  /// 解析模型返回的规则列表，接受三种形态：
+  /// 1. 已解码的 List（[LlmClient.chatJson] 的正常返回）；
+  /// 2. {"rules": [...]} 对象兜底；
+  /// 3. 原始 JSON 字符串（测试 / 旧路径兼容）。
+  ///
+  /// 解析失败抛 FormatException（由调用方提示用户），不再静默吞掉；
+  /// 此前对已解码对象误走 `toString()` 再解析的路径，曾导致所有提取结果为空。
+  static List<RuleItem> parseRuleItems(dynamic raw) {
+    try {
+      return _parseDecodedRuleItems(raw);
+    } on FormatException catch (e) {
+      debugPrint('[learn] 规则解析失败：$e；模型输出片段：${_snippet(raw)}');
+      rethrow;
+    }
+  }
+
+  static List<RuleItem> _parseDecodedRuleItems(dynamic raw) {
     final result = <RuleItem>[];
     List<Map<String, dynamic>> items;
-    try {
-      items = extractJsonList(raw is String ? raw : raw.toString());
-    } on FormatException {
-      return const [];
+    if (raw is List) {
+      items = raw
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } else if (raw is Map) {
+      List? list;
+      for (final v in raw.values) {
+        if (v is List) {
+          list = v;
+          break;
+        }
+      }
+      if (list == null) {
+        throw const FormatException('模型输出对象中不含规则数组');
+      }
+      items = list
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } else if (raw is String) {
+      items = extractJsonList(raw);
+    } else {
+      throw FormatException('模型输出不是规则数组（${raw.runtimeType}）');
     }
     for (final item in items) {
       final content = readStr(item, ['content', 'rule', 'text']);
@@ -276,6 +366,11 @@ class RuleGenerators {
       result.add(RuleItem(category, content));
     }
     return result;
+  }
+
+  static String _snippet(dynamic raw) {
+    final s = raw.toString();
+    return s.length > 200 ? '${s.substring(0, 200)}…' : s;
   }
 
   /// 按段落边界分块。

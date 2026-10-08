@@ -32,7 +32,7 @@ class DraftsPage extends ConsumerWidget {
         if (state.records.isEmpty)
           const Padding(
             padding: EdgeInsets.only(top: 64),
-            child: Center(child: Text('暂无草稿，去收件箱生成第一封吧')),
+            child: Center(child: Text('暂无草稿，去邮件列表生成第一封吧')),
           ),
         for (final r in state.records) _DraftTile(record: r),
       ],

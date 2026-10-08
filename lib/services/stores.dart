@@ -28,6 +28,13 @@ class LearnStateStore {
     _state = _state.withAdded(consumedEmails, DateTime.now());
     await writeYamlFile(_file, _state.toMap());
   }
+
+  /// 清空学习记录（已消费邮件 + 上次学习时间），不影响已生成的规则。
+  /// 用于重置后重新学习全部历史邮件。
+  Future<void> reset() async {
+    _state = LearnState.empty();
+    await writeYamlFile(_file, _state.toMap());
+  }
 }
 
 /// 草稿存储（空间内 `drafts/<id>.yaml`，每条草稿一个文件，便于追溯）。
@@ -214,6 +221,4 @@ List<EmailSummary> mergeInboxMessages(
   return merged.length <= limit ? merged : merged.sublist(0, limit);
 }
 
-String _mergeKey(EmailSummary m) => m.uid != null
-    ? '${m.accountId}:${m.folder}:uid:${m.uid}'
-    : '${m.accountId}:${m.folder}:mid:${m.messageId}';
+String _mergeKey(EmailSummary m) => m.storageKey;

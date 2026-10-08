@@ -47,7 +47,7 @@ class _HomePageState extends State<HomePage> {
               NavigationRailDestination(
                 icon: Icon(Icons.inbox_outlined),
                 selectedIcon: Icon(Icons.inbox),
-                label: Text('收件箱'),
+                label: Text('邮件列表'),
               ),
               NavigationRailDestination(
                 icon: Icon(Icons.edit_note_outlined),

@@ -209,6 +209,42 @@ class MailService {
     return client.selectMailbox(boxes.firstWhere((b) => b.name == matched));
   }
 
+  /// 按文件夹与 UID 单封拉取完整邮件并转成应用模型。
+  ///
+  /// 详情弹窗按需补取用：老缓存邮件在模型扩展（cc / 发信认证信息）之前落盘，
+  /// 增量同步只拉新 UID 不会再处理它们，这里按 UID 现拉一次补齐。
+  /// 邮件在服务器上不存在返回 null；连接 / 文件夹错误向上抛，由调用方兜底。
+  Future<EmailSummary?> fetchByUid({
+    required String folder,
+    required int uid,
+    String accountId = '',
+    Set<String> spaceAddresses = const {},
+  }) async {
+    final client = await _connect();
+    try {
+      // 选中动作本身即为目的（后续 UID FETCH 作用于当前文件夹）。
+      if (folder == 'INBOX') {
+        await client.selectInbox();
+      } else {
+        await _selectByName(client, folder);
+      }
+      final sequence = mail.MessageSequence(isUidSequence: true)..add(uid);
+      final fetched = await client.fetchMessageSequence(
+        sequence,
+        fetchPreference: mail.FetchPreference.fullWhenWithinSize,
+      );
+      // folder 入参即缓存里存的解析后服务器名，直接作为标签保持一致。
+      for (final m in fetched) {
+        if (m.uid == uid) {
+          return _toSummary(m, folder, accountId, spaceAddresses);
+        }
+      }
+      return null;
+    } finally {
+      await client.disconnect();
+    }
+  }
+
   /// SMTP 发送纯文本回复（带 In-Reply-To 头，便于客户端线程归组）。
   ///
   /// [ccAddresses] 用于转发场景：抄送客户写信的原始收件地址
@@ -273,11 +309,15 @@ class MailService {
         .map((a) => a.email)
         .whereType<String>()
         .toList();
+    final authResults = m.getHeaderValue('authentication-results');
     return EmailSummary(
       messageId: messageId,
       subject: m.decodeSubject() ?? '（无主题）',
       fromAddress: m.from?.first.email ?? m.envelope?.from?.first.email ?? '',
       toAddresses: toAddresses,
+      ccAddresses: ccAddresses,
+      mailedBy: parseMailedBy(authResults),
+      signedBy: parseSignedBy(authResults),
       date: date.toIso8601String(),
       folder: folder,
       bodyText: body,
@@ -377,6 +417,34 @@ const Set<String> _sentFolderAliases = {
   '已发送',
   '已发邮件',
 };
+
+/// 从 Authentication-Results 头解析 spf=pass 的发信域名（Gmail 的 mailed-by）。
+///
+/// 只信收件服务器的判定（spf=pass 才取 smtp.mailfrom 域名），不回退到
+/// Return-Path 等客户端可伪造的头；无该头或未通过返回空串。
+String parseMailedBy(String? authResults) {
+  if (authResults == null) return '';
+  for (final clause in authResults.split(';')) {
+    if (!clause.trim().toLowerCase().startsWith('spf=pass')) continue;
+    final match = RegExp(r'smtp\.mailfrom=([^\s;)]+)').firstMatch(clause);
+    if (match == null) continue;
+    final value = match.group(1)!;
+    return value.contains('@') ? value.split('@').last : value;
+  }
+  return '';
+}
+
+/// 从 Authentication-Results 头解析 dkim=pass 的签名域名（Gmail 的 signed-by）。
+/// 无该头或未通过返回空串。
+String parseSignedBy(String? authResults) {
+  if (authResults == null) return '';
+  for (final clause in authResults.split(';')) {
+    if (!clause.trim().toLowerCase().startsWith('dkim=pass')) continue;
+    final match = RegExp(r'header\.d=([^\s;)]+)').firstMatch(clause);
+    if (match != null) return match.group(1)!;
+  }
+  return '';
+}
 
 /// 一次文件夹增量同步的结果。
 class InboxSyncResult {

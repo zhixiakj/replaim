@@ -38,15 +38,23 @@ class Conversation {
     return null;
   }
 
+  /// 是否已回复（列表「已回」标记用）：最新一封对方来件之后已有我方发出
+  /// （来件不是最后一封）。纯外发（从未有来件）与待回复均为 false，不标。
+  bool get replied => latestIncoming != null && lastFromMe;
+
   bool isFromMe(EmailSummary m) =>
       meAddresses.contains(m.fromAddress.toLowerCase().trim());
 }
 
 /// 按参与人集合把邮件汇总成会话列表（按最后活动时间倒序）。
 ///
-/// 每封邮件的参与人 = 发件人（若非本空间地址）∪ 全部非本空间的 To 收件人：
-/// - 「张三→我」与「我→张三」的参与人集合相同，进同一会话；
-/// - 群发/抄送场景按收件人集合归为一个群会话（Cc 不入库，不参与归组）；
+/// 方向不对称归组（对客服转发场景至关重要）：
+/// - **来信**（发件人非本空间账号）只按发件人归组。来信 To/Cc 中的非空间
+///   地址必然是 detectForwardedRecipients 判出的「原始收件」—— 即
+///   support@xxx 这类转发别名（我方业务地址）或客户侧抄送，若计入参与人，
+///   来信集合是 {客户, support@}，而回信（To=客户）集合是 {客户}，
+///   同一客户的往来会被裂成两个会话；
+/// - **去信**（发件人是本空间账号）按全部非空间 To 收件人归组（群发语义）。
 /// - 参与人地址做小写与去空格归一。
 List<Conversation> groupConversations(
     List<EmailSummary> messages, Set<String> meAddresses) {
@@ -76,13 +84,13 @@ List<Conversation> groupConversations(
 }
 
 List<String> _participantsOf(EmailSummary m, Set<String> me) {
-  final set = <String>{};
   final from = m.fromAddress.toLowerCase().trim();
-  if (from.isNotEmpty && !me.contains(from)) set.add(from);
+  final fromMe = from.isNotEmpty && me.contains(from);
+  if (!fromMe) return from.isEmpty ? <String>[] : [from];
+  final set = <String>{};
   for (final raw in m.toAddresses) {
     final addr = raw.toLowerCase().trim();
     if (addr.isNotEmpty && !me.contains(addr)) set.add(addr);
   }
-  final list = set.toList()..sort();
-  return list;
+  return set.toList()..sort();
 }

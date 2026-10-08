@@ -24,6 +24,14 @@ class LearnPage extends ConsumerWidget {
           children: [
             Text('学习中心', style: Theme.of(context).textTheme.headlineSmall),
             const Spacer(),
+            OutlinedButton.icon(
+              onPressed: state.running
+                  ? null
+                  : () => _confirmResetLearning(context, ref),
+              icon: const Icon(Icons.restart_alt, size: 18),
+              label: const Text('重置学习记录'),
+            ),
+            const SizedBox(width: 8),
             FilledButton.icon(
               onPressed: state.running
                   ? null
@@ -40,7 +48,9 @@ class LearnPage extends ConsumerWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          '从「${learnFolders.join('、')}」近 $learnMonths 个月的历史往来中提炼回复规则（空间内全部账号逐一学习）。'
+          '从「${learnFolders.join('、')}」与收件箱近 $learnMonths 个月的历史中提炼回复规则：'
+          '学习时自动把客户来信与你的回复按线程配对，从「问了什么 → 怎么答」中学习'
+          '（空间内全部账号逐一学习）。'
           '已学习过的邮件不会重复使用；邮件按时间升序处理、冲突时新邮件优先，'
           '保证旧邮件不会覆盖新邮件沉淀的规则。学习范围可在「空间」页调整。',
           style: Theme.of(context).textTheme.bodySmall,
@@ -154,5 +164,31 @@ class LearnPage extends ConsumerWidget {
         ),
       ],
     );
+  }
+}
+
+/// 重置学习记录：确认后清空「已消费邮件」（不动已生成的规则），
+/// 下次学习会重新读取全部历史邮件。
+Future<void> _confirmResetLearning(BuildContext context, WidgetRef ref) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('重置学习记录'),
+      content: const Text(
+          '将清空「已消费邮件」记录，不影响已生成的规则。下次「开始增量学习」会重新读取全部历史邮件。确定？'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('重置'),
+        ),
+      ],
+    ),
+  );
+  if (ok == true) {
+    await ref.read(learnProvider.notifier).resetLearning();
   }
 }
