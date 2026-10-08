@@ -40,10 +40,10 @@ class MailSpace {
   final DateTime createdAt;
 
   List<MailAccountConfig> get receiveAccounts =>
-      accounts.where((a) => a.receiveEnabled).toList();
+      accounts.where((a) => a.enabled && a.receiveEnabled).toList();
 
   List<MailAccountConfig> get sendAccounts =>
-      accounts.where((a) => a.sendEnabled).toList();
+      accounts.where((a) => a.enabled && a.sendEnabled).toList();
 
   /// 空间内全部账号的邮箱地址（小写，用于转发识别等）。
   Set<String> get accountAddresses => {
@@ -61,13 +61,20 @@ class MailSpace {
 
   /// 发信账号解析：优先收信账号自己发（线程最自然）；
   /// 收信账号未开发信时回落到 [defaultSendAccountId]；再回落到任一可发信账号。
+  /// 停用（enabled=false）的账号三级都不参与。
   MailAccountConfig? resolveSender(String? receivingAccountId) {
     final receiving = accountById(receivingAccountId);
-    if (receiving != null && receiving.sendEnabled) return receiving;
+    if (receiving != null &&
+        receiving.enabled &&
+        receiving.sendEnabled) {
+      return receiving;
+    }
     final fallback = accountById(defaultSendAccountId);
-    if (fallback != null && fallback.sendEnabled) return fallback;
+    if (fallback != null && fallback.enabled && fallback.sendEnabled) {
+      return fallback;
+    }
     for (final a in accounts) {
-      if (a.sendEnabled) return a;
+      if (a.enabled && a.sendEnabled) return a;
     }
     return null;
   }
@@ -125,6 +132,7 @@ class MailAccountConfig {
     this.smtpHost = '',
     this.smtpPort = 465,
     this.smtpSecure = true,
+    this.enabled = true,
     this.receiveEnabled = true,
     this.sendEnabled = true,
     this.learnFolders = const ['Sent'],
@@ -152,6 +160,10 @@ class MailAccountConfig {
 
   /// true = SSL/TLS（465），false = STARTTLS 由端口决定（587 时通常为 true + STARTTLS）。
   final bool smtpSecure;
+
+  /// 账号级总开关：停用后不参与收信、发信与学习，配置与凭证保留，
+  /// 可随时再启用。凭证不全（如 OAuth 未完成授权）保存的账号会自动停用。
+  final bool enabled;
 
   /// 是否参与收信（IMAP 拉取收件箱）。
   final bool receiveEnabled;
@@ -192,6 +204,7 @@ class MailAccountConfig {
         'smtp_host': smtpHost,
         'smtp_port': smtpPort,
         'smtp_secure': smtpSecure,
+        'enabled': enabled,
         'receive_enabled': receiveEnabled,
         'send_enabled': sendEnabled,
         'learn_folders': learnFolders,
@@ -211,6 +224,8 @@ class MailAccountConfig {
         smtpHost: map['smtp_host'] as String? ?? '',
         smtpPort: map['smtp_port'] as int? ?? 465,
         smtpSecure: map['smtp_secure'] as bool? ?? true,
+        // 旧配置无此键：缺省启用，行为与升级前完全一致。
+        enabled: map['enabled'] as bool? ?? true,
         receiveEnabled: map['receive_enabled'] as bool? ?? true,
         sendEnabled: map['send_enabled'] as bool? ?? true,
         learnFolders: (map['learn_folders'] as List?)
@@ -235,6 +250,7 @@ class MailAccountConfig {
     String? smtpHost,
     int? smtpPort,
     bool? smtpSecure,
+    bool? enabled,
     bool? receiveEnabled,
     bool? sendEnabled,
     List<String>? learnFolders,
@@ -251,6 +267,7 @@ class MailAccountConfig {
         smtpHost: smtpHost ?? this.smtpHost,
         smtpPort: smtpPort ?? this.smtpPort,
         smtpSecure: smtpSecure ?? this.smtpSecure,
+        enabled: enabled ?? this.enabled,
         receiveEnabled: receiveEnabled ?? this.receiveEnabled,
         sendEnabled: sendEnabled ?? this.sendEnabled,
         learnFolders: learnFolders ?? this.learnFolders,

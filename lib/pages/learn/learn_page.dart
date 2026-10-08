@@ -11,9 +11,11 @@ class LearnPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(learnProvider);
     final space = ref.watch(currentSpaceProvider).space;
-    // 学习文件夹按账号配置（各服务商命名不同），展示用去重合集。
+    // 学习文件夹按账号配置（各服务商命名不同），展示用去重合集
+    //（停用账号不参与学习，也不展示）。
     final learnFolders = <String>{
-      for (final a in space?.accounts ?? const []) ...a.learnFolders,
+      for (final a in space?.accounts ?? const [])
+        if (a.enabled) ...a.learnFolders,
     }.toList();
     final learnMonths = space?.learnMonths ?? 12;
     final notifier = ref.read(learnProvider.notifier);

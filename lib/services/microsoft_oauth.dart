@@ -187,15 +187,36 @@ class MicrosoftOAuth {
     try {
       response = await _dio.post<Map<String, dynamic>>(tokenEndpoint,
           data: form);
+    } on DioException catch (e) {
+      // 4xx 响应的 body 里是 error / error_description（AADSTS 详情），
+      // 必须透出让用户直接看到微软拒绝的原因（如帐户类型与端点不匹配）。
+      final response = e.response;
+      if (response == null) {
+        throw MicrosoftOAuthException('连接微软令牌服务失败：$e');
+      }
+      final status = response.statusCode;
+      final data = response.data;
+      String detail;
+      if (data is Map && data['error'] != null) {
+        final desc = data['error_description'] ?? '';
+        detail =
+            '${data['error']}${desc.toString().isEmpty ? '' : '\n$desc'}';
+      } else if (data is String && data.trim().isNotEmpty) {
+        detail = data;
+      } else {
+        detail = e.message ?? '无响应体';
+      }
+      throw MicrosoftOAuthException(
+          '微软令牌接口返回 HTTP ${status ?? '?'}：$detail');
     } catch (e) {
-      throw MicrosoftOAuthException('连接微软登录服务失败：$e');
+      throw MicrosoftOAuthException('连接微软令牌服务失败：$e');
     }
     final body = response.data ?? const {};
     final error = body['error'];
     if (error != null) {
       final detail = body['error_description'] ?? '';
       throw MicrosoftOAuthException(
-          '微软返回授权错误：$error${detail.isEmpty ? '' : '\n$detail'}');
+          '微软返回授权错误：$error${detail.toString().isEmpty ? '' : '\n$detail'}');
     }
     return body;
   }

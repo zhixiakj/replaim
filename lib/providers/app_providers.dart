@@ -561,6 +561,7 @@ class LearnController extends Notifier<LearnRunState> {
     final secretsNotifier = ref.read(secretsProvider.notifier);
     final usable = <MailAccountConfig>[];
     for (final a in space.accounts) {
+      if (!a.enabled) continue; // 停用账号不参与学习
       if (secretsNotifier.buildMailService(a).isReceiveReady) {
         usable.add(a);
       }

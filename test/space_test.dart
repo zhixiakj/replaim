@@ -31,6 +31,7 @@ void main() {
     String email, {
     bool receive = true,
     bool send = true,
+    bool enabled = true,
     String? id,
     List<String> learnFolders = const ['Sent'],
   }) =>
@@ -39,6 +40,7 @@ void main() {
         email: email,
         imapHost: 'imap.example.com',
         smtpHost: 'smtp.example.com',
+        enabled: enabled,
         receiveEnabled: receive,
         sendEnabled: send,
         learnFolders: learnFolders,
@@ -138,6 +140,33 @@ void main() {
       expect(space.sendAccounts.map((a) => a.id), ['acct_a']);
       expect(space.accountAddresses, {'a@shop.com', 'b@shop.com'});
     });
+
+    test('enabled round-trip：缺省启用 / 显式停用 / copyWith', () {
+      final on = MailAccountConfig(email: 'a@x.com');
+      expect(on.enabled, isTrue);
+      final off = on.copyWith(enabled: false);
+      expect(off.enabled, isFalse);
+      expect(on.enabled, isTrue); // copyWith 不影响原实例
+      final back = MailAccountConfig.fromMap(off.toMap());
+      expect(back.enabled, isFalse);
+      // 旧 YAML 无 enabled 键 → 缺省启用，行为与升级前一致。
+      final legacy = MailAccountConfig.fromMap({
+        'id': 'acct_old',
+        'email': 'old@qq.com',
+        'imap_host': 'imap.qq.com',
+      });
+      expect(legacy.enabled, isTrue);
+    });
+
+    test('停用账号退出收发，但仍算空间地址（会话归组 / 转发识别）', () {
+      final space = MailSpace(id: 's', name: 'n', accounts: [
+        account('a@shop.com', id: 'acct_a'),
+        account('b@shop.com', enabled: false, id: 'acct_b'),
+      ]);
+      expect(space.receiveAccounts.map((a) => a.id), ['acct_a']);
+      expect(space.sendAccounts.map((a) => a.id), ['acct_a']);
+      expect(space.accountAddresses, {'a@shop.com', 'b@shop.com'});
+    });
   });
 
   group('resolveSender 发信账号解析', () {
@@ -183,6 +212,41 @@ void main() {
         account('support@g.com', id: 'acct_out'),
       ]);
       expect(space.resolveSender('acct_missing')!.email, 'support@g.com');
+    });
+
+    test('收信账号停用 → 不用自己，回落默认发信账号', () {
+      final space = MailSpace(
+        id: 's',
+        name: 'n',
+        accounts: [
+          account('noreply@g.com', enabled: false, id: 'acct_in'),
+          account('support@g.com', receive: false, id: 'acct_out'),
+        ],
+        defaultSendAccountId: 'acct_out',
+      );
+      expect(space.resolveSender('acct_in')!.email, 'support@g.com');
+    });
+
+    test('默认发信账号停用 → 回落任一启用且可发的账号', () {
+      final space = MailSpace(
+        id: 's',
+        name: 'n',
+        accounts: [
+          account('noreply@g.com', send: false, id: 'acct_in'),
+          account('old@g.com', enabled: false, id: 'acct_old'),
+          account('support@g.com', receive: false, id: 'acct_out'),
+        ],
+        defaultSendAccountId: 'acct_old',
+      );
+      expect(space.resolveSender('acct_in')!.email, 'support@g.com');
+    });
+
+    test('全部账号停用 → null', () {
+      final space = MailSpace(id: 's', name: 'n', accounts: [
+        account('a@g.com', enabled: false, id: 'acct_a'),
+      ]);
+      expect(space.resolveSender('acct_a'), isNull);
+      expect(space.resolveSender(null), isNull);
     });
   });
 

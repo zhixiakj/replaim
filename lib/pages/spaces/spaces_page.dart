@@ -69,8 +69,10 @@ class _SpacesPageState extends ConsumerState<SpacesPage> {
             children: [
               Text('空间管理', style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(width: 12),
-              Text('共 ${spaces.length} 个空间',
-                  style: Theme.of(context).textTheme.bodySmall),
+              Text(
+                '共 ${spaces.length} 个空间',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
               const Spacer(),
               OutlinedButton.icon(
                 onPressed: _createSpace,
@@ -100,17 +102,20 @@ class _SpacesPageState extends ConsumerState<SpacesPage> {
                         title: Row(
                           children: [
                             Expanded(
-                                child: Text(s.name,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis)),
+                              child: Text(
+                                s.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
                             if (isCurrent)
                               Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 2),
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
                                 decoration: BoxDecoration(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .primary
+                                  color: Theme.of(context).colorScheme.primary
                                       .withValues(alpha: 0.12),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
@@ -118,8 +123,9 @@ class _SpacesPageState extends ConsumerState<SpacesPage> {
                                   '当前',
                                   style: TextStyle(
                                     fontSize: 11,
-                                    color:
-                                        Theme.of(context).colorScheme.primary,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .primary,
                                   ),
                                 ),
                               ),
@@ -143,10 +149,7 @@ class _SpacesPageState extends ConsumerState<SpacesPage> {
               ),
               const VerticalDivider(width: 1, thickness: 1),
               Expanded(
-                child: _SpaceDetail(
-                  key: ValueKey(editing.id),
-                  space: editing,
-                ),
+                child: _SpaceDetail(key: ValueKey(editing.id), space: editing),
               ),
             ],
           ),
@@ -203,7 +206,8 @@ class _SpacesPageState extends ConsumerState<SpacesPage> {
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.error),
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('删除'),
           ),
@@ -272,9 +276,11 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
     if (space == null) return;
     space
       ..name = _name.text.trim().isEmpty ? space.name : _name.text.trim()
-      ..outputLanguage =
-          _outputLanguage.text.trim().isEmpty ? 'English' : _outputLanguage.text.trim()
-      ..learnMonths = int.tryParse(_learnMonths.text.trim()) ?? space.learnMonths
+      ..outputLanguage = _outputLanguage.text.trim().isEmpty
+          ? 'English'
+          : _outputLanguage.text.trim()
+      ..learnMonths =
+          int.tryParse(_learnMonths.text.trim()) ?? space.learnMonths
       ..llmProfileId = _llmId.isEmpty ? null : _llmId
       ..defaultSendAccountId = _defaultSendId.isEmpty ? null : _defaultSendId;
     await ref.read(spacesProvider.notifier).save(space);
@@ -296,8 +302,10 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
         Row(
           children: [
             Expanded(
-              child: Text('空间：${space.name}',
-                  style: Theme.of(context).textTheme.titleLarge),
+              child: Text(
+                '空间：${space.name}',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
             ),
             if (cur.space?.id != space.id)
               FilledButton.tonalIcon(
@@ -312,46 +320,56 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
         const SizedBox(height: 16),
 
         // ---------------- 基本信息 ----------------
-        _section(context, title: '基本信息', children: [
-          _textField(_name, '空间名称'),
-          _dropdown(
-            value: _llmId,
-            label: '分配大模型（在设置页管理多个模型）',
-            items: [
-              const DropdownMenuItem(value: '', child: Text('未分配')),
-              for (final p in profiles)
-                DropdownMenuItem(
-                    value: p.id, child: Text('${p.name}（${p.config.model}）')),
-            ],
-            onChanged: (v) => setState(() => _llmId = v ?? ''),
-          ),
-          _dropdown(
-            value: _defaultSendId,
-            label: '默认发信账号（收信账号未开发信时回落使用）',
-            items: [
-              const DropdownMenuItem(value: '', child: Text('自动（任一可发信账号）')),
-              for (final a in space.sendAccounts)
-                DropdownMenuItem(value: a.id, child: Text(a.email)),
-            ],
-            onChanged: (v) => setState(() => _defaultSendId = v ?? ''),
-          ),
-          _textField(_outputLanguage, '草稿输出语言（默认 English）'),
-        ]),
+        _section(
+          context,
+          title: '基本信息',
+          children: [
+            _textField(_name, '空间名称'),
+            _dropdown(
+              value: _llmId,
+              label: '分配大模型（在设置页管理多个模型）',
+              items: [
+                const DropdownMenuItem(value: '', child: Text('未分配')),
+                for (final p in profiles)
+                  DropdownMenuItem(
+                    value: p.id,
+                    child: Text('${p.name}（${p.config.model}）'),
+                  ),
+              ],
+              onChanged: (v) => setState(() => _llmId = v ?? ''),
+            ),
+            _dropdown(
+              value: _defaultSendId,
+              label: '默认发信账号（收信账号未开发信时回落使用）',
+              items: [
+                const DropdownMenuItem(value: '', child: Text('自动（任一可发信账号）')),
+                for (final a in space.sendAccounts)
+                  DropdownMenuItem(value: a.id, child: Text(a.email)),
+              ],
+              onChanged: (v) => setState(() => _defaultSendId = v ?? ''),
+            ),
+            _textField(_outputLanguage, '草稿输出语言（默认 English）'),
+          ],
+        ),
 
         // ---------------- 学习偏好 ----------------
-        _section(context, title: '学习偏好（按空间）', children: [
-          _textField(_learnMonths, '学习时间范围（近 N 个月）', num: true),
-          const Padding(
-            padding: EdgeInsets.only(bottom: 4),
-            child: Text(
-              '历史学习文件夹按邮箱账号单独设置（文件夹名因服务商而异：Gmail 为 '
-              '[Gmail]/Sent Mail（中文账号为 [Gmail]/已发送邮件）、QQ/163 为 '
-              'Sent Messages、Outlook 为 Sent）。请在下方「邮箱账号」中编辑各账号'
-              '填写；常见命名会自动匹配，全部未命中时学习会按服务器标记自动识别。',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
+        _section(
+          context,
+          title: '学习偏好（按空间）',
+          children: [
+            _textField(_learnMonths, '学习时间范围（近 N 个月）', num: true),
+            const Padding(
+              padding: EdgeInsets.only(bottom: 4),
+              child: Text(
+                '历史学习文件夹按邮箱账号单独设置（文件夹名因服务商而异：Gmail 为 '
+                '[Gmail]/Sent Mail（中文账号为 [Gmail]/已发送邮件）、QQ/163 为 '
+                'Sent Messages、Outlook 为 Sent）。请在下方「邮箱账号」中编辑各账号'
+                '填写；常见命名会自动匹配，全部未命中时学习会按服务器标记自动识别。',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
             ),
-          ),
-        ]),
+          ],
+        ),
 
         // ---------------- 账号管理 ----------------
         _section(
@@ -362,16 +380,21 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
             if (space.accounts.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
-                child: Text('还没有账号，点击下方按钮添加',
-                    style: TextStyle(color: Colors.grey)),
+                child: Text(
+                  '还没有账号，点击下方按钮添加',
+                  style: TextStyle(color: Colors.grey),
+                ),
               )
             else
               for (var i = 0; i < space.accounts.length; i++)
                 _AccountTile(
                   account: space.accounts[i],
-                  isDefaultSender: space.defaultSendAccountId == space.accounts[i].id,
+                  isDefaultSender:
+                      space.defaultSendAccountId == space.accounts[i].id,
                   onEdit: () => _editAccount(space.accounts[i]),
                   onDelete: () => _deleteAccount(space.accounts[i]),
+                  onToggleEnabled: (v) =>
+                      _toggleAccountEnabled(space.accounts[i], v),
                 ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
@@ -436,6 +459,21 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
     if (mounted) setState(() {});
   }
 
+  /// 列表里直接启停账号：停用即整体退出收信 / 发信 / 学习（配置保留）。
+  /// 手动重新启用不做凭证校验：用户明确意图，配置不完整时由收件箱同步报错兜底。
+  Future<void> _toggleAccountEnabled(MailAccountConfig account, bool v) async {
+    final space = ref.read(spacesProvider).byId(widget.space.id);
+    if (space == null) return;
+    final i = space.accounts.indexWhere((a) => a.id == account.id);
+    if (i < 0) return;
+    space.accounts[i] = account.copyWith(enabled: v);
+    if (!v && space.defaultSendAccountId == account.id) {
+      space.defaultSendAccountId = null;
+    }
+    await ref.read(spacesProvider.notifier).save(space);
+    if (mounted) setState(() {});
+  }
+
   Future<void> _deleteAccount(MailAccountConfig account) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -466,10 +504,12 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
     if (mounted) setState(() {});
   }
 
-  Widget _section(BuildContext context,
-      {required String title,
-      String? subtitle,
-      required List<Widget> children}) {
+  Widget _section(
+    BuildContext context, {
+    required String title,
+    String? subtitle,
+    required List<Widget> children,
+  }) {
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       child: Padding(
@@ -490,57 +530,61 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
     );
   }
 
-  Widget _textField(TextEditingController c, String label,
-          {bool num = false, String? helper}) =>
-      Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: TextField(
-          controller: c,
-          keyboardType: num ? TextInputType.number : null,
-          decoration: InputDecoration(
-            labelText: label,
-            helperText: helper,
-            border: const OutlineInputBorder(),
-            isDense: true,
-          ),
-        ),
-      );
+  Widget _textField(
+    TextEditingController c,
+    String label, {
+    bool num = false,
+    String? helper,
+  }) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: TextField(
+      controller: c,
+      keyboardType: num ? TextInputType.number : null,
+      decoration: InputDecoration(
+        labelText: label,
+        helperText: helper,
+        border: const OutlineInputBorder(),
+        isDense: true,
+      ),
+    ),
+  );
 
   Widget _dropdown({
     required String value,
     required String label,
     required List<DropdownMenuItem<String>> items,
     required ValueChanged<String?> onChanged,
-  }) =>
-      Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: DropdownButtonFormField<String>(
-          initialValue: value,
-          isExpanded: true,
-          decoration: InputDecoration(
-            labelText: label,
-            border: const OutlineInputBorder(),
-            isDense: true,
-          ),
-          items: items,
-          onChanged: onChanged,
-        ),
-      );
+  }) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: DropdownButtonFormField<String>(
+      initialValue: value,
+      isExpanded: true,
+      decoration: InputDecoration(
+        labelText: label,
+        border: const OutlineInputBorder(),
+        isDense: true,
+      ),
+      items: items,
+      onChanged: onChanged,
+    ),
+  );
 }
 
-/// 账号卡片：邮箱 + 收/发能力徽标 + 编辑 / 删除。
+/// 账号卡片：邮箱 + 启停开关 + 收/发能力徽标 + 编辑 / 删除。
 class _AccountTile extends StatelessWidget {
   const _AccountTile({
     required this.account,
     required this.isDefaultSender,
     required this.onEdit,
     required this.onDelete,
+    required this.onToggleEnabled,
   });
 
   final MailAccountConfig account;
   final bool isDefaultSender;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final ValueChanged<bool> onToggleEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -548,11 +592,17 @@ class _AccountTile extends StatelessWidget {
       dense: true,
       contentPadding: EdgeInsets.zero,
       leading: Icon(
-        account.receiveEnabled && account.sendEnabled
-            ? Icons.mark_email_unread
-            : (account.receiveEnabled ? Icons.move_to_inbox : Icons.outgoing_mail),
+        !account.enabled
+            ? Icons.pause_circle_outline
+            : (account.receiveEnabled && account.sendEnabled
+                  ? Icons.mark_email_unread
+                  : (account.receiveEnabled
+                        ? Icons.move_to_inbox
+                        : Icons.outgoing_mail)),
         size: 20,
-        color: Theme.of(context).colorScheme.primary,
+        color: account.enabled
+            ? Theme.of(context).colorScheme.primary
+            : Colors.grey,
       ),
       title: Text(
         account.displayName.isEmpty
@@ -567,19 +617,33 @@ class _AccountTile extends StatelessWidget {
           spacing: 6,
           runSpacing: 4,
           children: [
-            _badge(context, account.receiveEnabled ? '收信' : '不收信',
-                account.receiveEnabled ? Colors.green : Colors.grey),
-            _badge(context, account.sendEnabled ? '发信' : '不发信',
-                account.sendEnabled ? Colors.blue : Colors.grey),
+            if (!account.enabled) _badge(context, '已停用', Colors.grey),
+            _badge(
+              context,
+              account.receiveEnabled ? '收信' : '不收信',
+              account.receiveEnabled ? Colors.green : Colors.grey,
+            ),
+            _badge(
+              context,
+              account.sendEnabled ? '发信' : '不发信',
+              account.sendEnabled ? Colors.blue : Colors.grey,
+            ),
             if (isDefaultSender) _badge(context, '默认发信', Colors.deepOrange),
-            _badge(context, '学习 ${account.learnFolders.join('、')}',
-                Colors.deepPurple),
+            _badge(
+              context,
+              '学习 ${account.learnFolders.join('、')}',
+              Colors.deepPurple,
+            ),
           ],
         ),
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          Switch(
+            value: account.enabled,
+            onChanged: onToggleEnabled,
+          ),
           IconButton(
             tooltip: '编辑',
             icon: const Icon(Icons.edit_outlined, size: 20),
@@ -596,14 +660,16 @@ class _AccountTile extends StatelessWidget {
   }
 
   Widget _badge(BuildContext context, String text, Color color) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Text(text,
-            style: TextStyle(fontSize: 11, color: color.withValues(alpha: 1))),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Text(
+      text,
+      style: TextStyle(fontSize: 11, color: color.withValues(alpha: 1)),
+    ),
+  );
 }
 
 /// 添加 / 编辑账号对话框。
@@ -617,8 +683,11 @@ class _AccountDialog extends ConsumerStatefulWidget {
   final MailSpace space;
   final MailAccountConfig? existing;
   final Future<void> Function(
-      MailAccountConfig account, String? password, mail.OauthToken? oauthToken)
-      onSaved;
+    MailAccountConfig account,
+    String? password,
+    mail.OauthToken? oauthToken,
+  )
+  onSaved;
 
   @override
   ConsumerState<_AccountDialog> createState() => _AccountDialogState();
@@ -637,10 +706,18 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
 
   bool _imapSecure = true;
   bool _smtpSecure = true;
+  bool _enabled = true;
   bool _receiveEnabled = true;
   bool _sendEnabled = true;
   bool _testing = false;
   String? _testResult;
+
+  /// 本次会话最近一次「测试连接」是否成功（null = 尚未测试）。
+  /// 不复用 _testResult 字符串：它还会被授权 / 校验消息复用，判定不可靠。
+  bool? _lastTestOk;
+
+  /// 编辑时钥匙串里是否已存该账号的密码（空输入是否等于「缺密码」）。
+  bool _hadStoredPassword = false;
 
   /// OAuth2 登录（Outlook 必需）还是密码 / 授权码。
   bool _useOAuth = false;
@@ -685,14 +762,18 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
     _smtpHost = TextEditingController(text: m?.smtpHost ?? '');
     _smtpPort = TextEditingController(text: '${m?.smtpPort ?? 465}');
     _password = TextEditingController();
-    _learnFolders = TextEditingController(text: m?.learnFolders.join(', ') ?? '');
+    _learnFolders = TextEditingController(
+      text: m?.learnFolders.join(', ') ?? '',
+    );
     _oauthClientId = TextEditingController(text: m?.oauthClientId ?? '');
     if (m != null &&
         (ref.read(secretsProvider).mailPasswords[m.id] ?? '').isNotEmpty) {
       _password.text = _pwdMask;
+      _hadStoredPassword = true;
     }
     _imapSecure = m?.imapSecure ?? true;
     _smtpSecure = m?.smtpSecure ?? true;
+    _enabled = m?.enabled ?? true;
     _receiveEnabled = m?.receiveEnabled ?? true;
     _sendEnabled = m?.sendEnabled ?? true;
     _useOAuth = m?.authType == kAuthTypeOauth;
@@ -707,8 +788,15 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
   void dispose() {
     _email.removeListener(_applyPreset);
     for (final c in [
-      _email, _displayName, _imapHost, _imapPort, _smtpHost, _smtpPort,
-      _password, _learnFolders, _oauthClientId,
+      _email,
+      _displayName,
+      _imapHost,
+      _imapPort,
+      _smtpHost,
+      _smtpPort,
+      _password,
+      _learnFolders,
+      _oauthClientId,
     ]) {
       c.dispose();
     }
@@ -746,56 +834,73 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
       .where((s) => s.isNotEmpty)
       .toList();
 
-  MailAccountConfig _buildFromForm() => (widget.existing ??
-          MailAccountConfig(id: newAccountId()))
-      .copyWith(
-    email: _email.text.trim(),
-    displayName: _displayName.text.trim(),
-    imapHost: _imapHost.text.trim(),
-    imapPort: int.tryParse(_imapPort.text.trim()) ?? 993,
-    imapSecure: _imapSecure,
-    smtpHost: _smtpHost.text.trim(),
-    smtpPort: int.tryParse(_smtpPort.text.trim()) ?? 465,
-    smtpSecure: _smtpSecure,
-    receiveEnabled: _receiveEnabled,
-    sendEnabled: _sendEnabled,
-    learnFolders: _parseFolders().isEmpty ? const ['Sent'] : _parseFolders(),
-    authType: _useOAuth ? kAuthTypeOauth : kAuthTypePassword,
-    oauthClientId: _oauthClientId.text.trim(),
-  );
+  MailAccountConfig _buildFromForm() =>
+      (widget.existing ?? MailAccountConfig(id: newAccountId())).copyWith(
+        email: _email.text.trim(),
+        displayName: _displayName.text.trim(),
+        imapHost: _imapHost.text.trim(),
+        imapPort: int.tryParse(_imapPort.text.trim()) ?? 993,
+        imapSecure: _imapSecure,
+        smtpHost: _smtpHost.text.trim(),
+        smtpPort: int.tryParse(_smtpPort.text.trim()) ?? 465,
+        smtpSecure: _smtpSecure,
+        enabled: _enabled,
+        receiveEnabled: _receiveEnabled,
+        sendEnabled: _sendEnabled,
+        learnFolders: _parseFolders().isEmpty
+            ? const ['Sent']
+            : _parseFolders(),
+        authType: _useOAuth ? kAuthTypeOauth : kAuthTypePassword,
+        oauthClientId: _oauthClientId.text.trim(),
+      );
+
+  /// 凭证未就绪 / 本次会话连接未成功时返回停用原因（保存仍放行，
+  /// 账号自动置为停用状态）；返回 null 表示可按开关状态保存。
+  /// 测试成功不自动启用：启用与否尊重开关，避免意外启用特意停用的账号。
+  String? _forcedOffReason() {
+    if (_useOAuth) {
+      if (!_hasOAuthToken) return '尚未完成 Microsoft 授权';
+    } else if (_effectivePassword == null && !_hadStoredPassword) {
+      return '尚未填写密码 / 授权码';
+    }
+    if (_lastTestOk == false) return '最近一次「测试连接」未成功';
+    return null;
+  }
 
   Future<void> _save() async {
     if (_email.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('请填写邮箱地址')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('请填写邮箱地址')));
       return;
     }
-    if (_useOAuth) {
-      if (_oauthClientId.text.trim().isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('请填写 Azure 应用客户端 ID')));
-        return;
-      }
-      if (!_hasOAuthToken) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('请先点击「登录 Microsoft 账号」完成授权')));
-        return;
-      }
-    }
-    final account = _buildFromForm();
+    // 不强制连接成功：未就绪的账号照常保存，只是自动停用，可稍后补齐再启用。
+    final offReason = _forcedOffReason();
+    var account = _buildFromForm();
+    if (offReason != null) account = account.copyWith(enabled: false);
     final password = _effectivePassword;
     // 对话框即将关闭：先取根级 messenger 与测试用凭证，保存后再异步核对。
     final messenger = ScaffoldMessenger.of(context);
     final svc = _mailServiceFor(account);
     Navigator.pop(context);
+    if (offReason != null) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            '${account.email}：$offReason，已保存为停用状态，'
+            '补齐并验证后可在账号列表中开启',
+          ),
+        ),
+      );
+    }
     await widget.onSaved(account, password, _pendingToken);
     unawaited(_validateFolders(messenger, account, svc));
   }
 
   /// 按当前表单状态组装 MailService（OAuth 模式带刚授权的待存 token，
   /// 密码模式带表单里新输入的密码），供测试 / 保存后核对复用。
-  MailService _mailServiceFor(MailAccountConfig account) =>
-      ref.read(secretsProvider.notifier).buildMailService(
+  MailService _mailServiceFor(MailAccountConfig account) => ref
+      .read(secretsProvider.notifier)
+      .buildMailService(
         account,
         passwordOverride: _effectivePassword,
         oauthOverride: _pendingToken,
@@ -805,24 +910,30 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
   bool get _hasOAuthToken =>
       _pendingToken != null ||
       parseOauthToken(
-              ref.watch(secretsProvider).mailOauth[widget.existing?.id]) !=
+            ref.watch(secretsProvider).mailOauth[widget.existing?.id],
+          ) !=
           null;
 
   /// 走浏览器完成 Microsoft OAuth2 授权（授权码 + PKCE，本机回环接收）。
   Future<void> _authorize() async {
     final clientId = _oauthClientId.text.trim();
     if (clientId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('请先填写 Azure 应用客户端 ID')));
+      // SnackBar 在对话框打开时会被遮罩压暗，改为对话框内红字。
+      setState(() => _testResult = '请先填写 Azure 应用客户端 ID'
+          '（Azure 应用 Overview 页的 Application (client) ID）');
       return;
     }
     setState(() => _authorizing = true);
     try {
       final token = await MicrosoftOAuth.authorize(
-          clientId: clientId, emailHint: _email.text.trim());
+        clientId: clientId,
+        emailHint: _email.text.trim(),
+      );
       if (!mounted) return;
-      final expiry =
-          token.expiresDateTime.toLocal().toString().substring(0, 16);
+      final expiry = token.expiresDateTime.toLocal().toString().substring(
+        0,
+        16,
+      );
       setState(() {
         _authorizing = false;
         _pendingToken = token;
@@ -840,8 +951,11 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
   /// 保存后异步核对学习文件夹名：LIST 服务器文件夹，用 matchMailboxName
   /// 校验；连不上则跳过（「测试连接」里也会核对）。只提示、不阻塞。
   /// [svc] 与凭证必须在对话框关闭前构造好（销毁后不能再读 ref/controller）。
-  Future<void> _validateFolders(ScaffoldMessengerState messenger,
-      MailAccountConfig account, MailService svc) async {
+  Future<void> _validateFolders(
+    ScaffoldMessengerState messenger,
+    MailAccountConfig account,
+    MailService svc,
+  ) async {
     if (!svc.isReceiveReady) return;
     try {
       final serverFolders = await svc.listFolders();
@@ -851,11 +965,16 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
       ];
       if (missing.isEmpty) return;
       final preview = serverFolders.take(8).join('、');
-      messenger.showSnackBar(SnackBar(content: Text(
-          '${account.email}：学习文件夹「${missing.join('、')}」在服务器上不存在'
-          '（现有：$preview'
-          '${serverFolders.length > 8 ? ' 等共 ${serverFolders.length} 个' : ''}），'
-          '可编辑该账号并点「从服务器读取文件夹列表」选取')));
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            '${account.email}：学习文件夹「${missing.join('、')}」在服务器上不存在'
+            '（现有：$preview'
+            '${serverFolders.length > 8 ? ' 等共 ${serverFolders.length} 个' : ''}），'
+            '可编辑该账号并点「从服务器读取文件夹列表」选取',
+          ),
+        ),
+      );
     } catch (_) {
       // 连不上服务器则跳过核对。
     }
@@ -866,6 +985,7 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
     final account = _buildFromForm();
     final svc = _mailServiceFor(account);
     var result = await svc.testConnection();
+    final testOk = result == null;
     if (result == null) {
       // 连接成功，顺带核对学习文件夹名（一次额外连接，手动触发可接受）。
       try {
@@ -877,7 +997,7 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
         result = missing.isEmpty
             ? '连接成功；学习文件夹「${account.learnFolders.join('、')}」✓ 已匹配'
             : '连接成功；⚠ 学习文件夹「${missing.join('、')}」在服务器上不存在'
-                '（可点下方按钮从服务器选取）';
+                  '（可点下方按钮从服务器选取）';
       } catch (_) {
         result = '连接成功（IMAP 登录正常）';
       }
@@ -885,6 +1005,7 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
     if (mounted) {
       setState(() {
         _testing = false;
+        _lastTestOk = testOk;
         _testResult = result;
       });
     }
@@ -896,10 +1017,13 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
     final account = _buildFromForm();
     final svc = _mailServiceFor(account);
     if (!svc.isReceiveReady) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(_useOAuth
-              ? '请先填写邮箱地址并完成 Microsoft 授权'
-              : '请先填写邮箱地址、IMAP 服务器和密码')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _useOAuth ? '请先填写邮箱地址并完成 Microsoft 授权' : '请先填写邮箱地址、IMAP 服务器和密码',
+          ),
+        ),
+      );
       return;
     }
     try {
@@ -919,26 +1043,33 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
                   for (final f in folders)
                     CheckboxListTile(
                       value: selected.contains(f),
-                      onChanged: (v) => setDialogState(() =>
-                          v == true ? selected.add(f) : selected.remove(f)),
+                      onChanged: (v) => setDialogState(
+                        () => v == true ? selected.add(f) : selected.remove(f),
+                      ),
                       controlAffinity: ListTileControlAffinity.leading,
                       dense: true,
                       title: Row(
                         children: [
                           Expanded(
-                              child:
-                                  Text(f, overflow: TextOverflow.ellipsis)),
+                            child: Text(f, overflow: TextOverflow.ellipsis),
+                          ),
                           if (f == recommended)
                             Container(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
                                 color: Colors.green.withValues(alpha: 0.12),
                                 borderRadius: BorderRadius.circular(8),
                               ),
-                              child: const Text('服务器已发送',
-                                  style: TextStyle(
-                                      fontSize: 10, color: Colors.green)),
+                              child: const Text(
+                                '服务器已发送',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.green,
+                                ),
+                              ),
                             ),
                         ],
                       ),
@@ -975,50 +1106,54 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
       return 'QQ、163 等需在邮箱后台生成授权码；保存后加密存入系统钥匙串';
     }
     final saved = ref.watch(secretsProvider).mailPasswords[m.id] ?? '';
-    return saved.isNotEmpty
-        ? '已保存授权码（框内圆点仅为占位）；更换时直接输入新授权码'
-        : '尚未保存密码';
+    return saved.isNotEmpty ? '已保存授权码（框内圆点仅为占位）；更换时直接输入新授权码' : '尚未保存密码';
   }
 
   /// OAuth2 模式的凭证区：Azure 客户端 ID + 浏览器授权按钮 + 授权状态。
   List<Widget> _oauthPane() => [
-        _field(
-          _oauthClientId,
-          'Azure 应用客户端 ID',
-          helper: 'Azure 门户注册「移动和桌面应用」获得（重定向 URI 填 '
-              'http://localhost，账号类型含个人 Microsoft 帐户）；'
-              '多个 Outlook 账号可复用同一个 ID',
+    _field(
+      _oauthClientId,
+      'Azure 应用客户端 ID',
+      helper:
+          'Azure 门户注册「移动和桌面应用」获得（重定向 URI 填 '
+          'http://localhost，账号类型含个人 Microsoft 帐户）；'
+          '多个 Outlook 账号可复用同一个 ID',
+    ),
+    const SizedBox(height: 4),
+    OutlinedButton.icon(
+      onPressed: _authorizing ? null : _authorize,
+      icon: _authorizing
+          ? const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.login),
+      label: Text(
+        _authorizing
+            ? '等待浏览器完成授权…（最多 5 分钟）'
+            : (_hasOAuthToken ? '重新登录 Microsoft 账号' : '登录 Microsoft 账号'),
+      ),
+    ),
+    if (!_hasOAuthToken && !_authorizing)
+      Padding(
+        padding: const EdgeInsets.only(top: 6, left: 4),
+        child: Text(
+          '尚未授权：也可先保存（账号将处于停用状态），稍后编辑完成登录再启用'
+          '（Outlook 还需先在网页版设置里开启 IMAP）',
+          style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
         ),
-        const SizedBox(height: 4),
-        OutlinedButton.icon(
-          onPressed: _authorizing ? null : _authorize,
-          icon: _authorizing
-              ? const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.login),
-          label: Text(_authorizing
-              ? '等待浏览器完成授权…（最多 5 分钟）'
-              : (_hasOAuthToken ? '重新登录 Microsoft 账号' : '登录 Microsoft 账号')),
-        ),
-        if (!_hasOAuthToken && !_authorizing)
-          Padding(
-            padding: const EdgeInsets.only(top: 6, left: 4),
-            child: Text(
-              '尚未授权：保存前需完成一次浏览器登录（Outlook 还需先在网页版'
-              ' 设置里开启 IMAP）',
-              style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
-            ),
-          ),
-      ];
+      ),
+  ];
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.existing == null
-          ? '添加邮箱账号（空间：${widget.space.name}）'
-          : '编辑账号 ${widget.existing!.email}'),
+      title: Text(
+        widget.existing == null
+            ? '添加邮箱账号（空间：${widget.space.name}）'
+            : '编辑账号 ${widget.existing!.email}',
+      ),
       content: SizedBox(
         width: 480,
         child: SingleChildScrollView(
@@ -1026,24 +1161,39 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _field(_email, '邮箱地址（同时作为登录用户名）',
-                  helper: '常见邮箱（Gmail / QQ / 163 / Outlook 等）'
-                      '输入地址后自动填充下方服务器与学习文件夹'),
+              _field(
+                _email,
+                '邮箱地址（同时作为登录用户名）',
+                helper:
+                    '常见邮箱（Gmail / QQ / 163 / Outlook 等）'
+                    '输入地址后自动填充下方服务器与学习文件夹',
+              ),
               _field(_displayName, '发件显示名（可选）'),
+              SwitchListTile(
+                value: _enabled,
+                onChanged: (v) => setState(() => _enabled = v),
+                title: const Text('启用此账号'),
+                subtitle: const Text('停用后不参与收信、发信与学习，配置保留可随时再开启'),
+                dense: true,
+              ),
               SwitchListTile(
                 value: _useOAuth,
                 onChanged: (v) => setState(() {
                   _useOAuth = v;
                   _authTouched = true;
                 }),
-                title:
-                    const Text('OAuth2 登录（Outlook 必需：微软已禁用密码登录）'),
+                title: const Text('OAuth2 登录（Outlook 必需：微软已禁用密码登录）'),
                 dense: true,
               ),
-              if (_useOAuth) ..._oauthPane()
+              if (_useOAuth)
+                ..._oauthPane()
               else
-                _field(_password, '密码 / 授权码',
-                    obscure: true, helper: _passwordHelper),
+                _field(
+                  _password,
+                  '密码 / 授权码',
+                  obscure: true,
+                  helper: _passwordHelper,
+                ),
               // 收信 / 发信配置按 tab 分组。不用 TabBarView：它需要有界
               // 高度，而两个 tab 内容高度差异大（收信 tab 多出学习文件夹），
               // 固定高度会让发信 tab 大量留白，故按索引切换内容、用
@@ -1070,7 +1220,8 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
                     ? const SizedBox(
                         width: 14,
                         height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2))
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
                     : const Icon(Icons.wifi_tethering),
                 label: Text(_testing ? '测试中…' : '测试连接'),
               ),
@@ -1083,8 +1234,8 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
                       color: _testResult!.contains('⚠')
                           ? Colors.orange.shade800
                           : (_testResult!.contains('成功')
-                              ? Colors.green
-                              : Colors.red),
+                                ? Colors.green
+                                : Colors.red),
                     ),
                   ),
                 ),
@@ -1097,114 +1248,137 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
           onPressed: () => Navigator.pop(context),
           child: const Text('取消'),
         ),
-        FilledButton(
-          onPressed: _save,
-          child: const Text('保存账号'),
-        ),
+        FilledButton(onPressed: _save, child: const Text('保存账号')),
       ],
     );
   }
 
   Widget _receivePane() => Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      SwitchListTile(
+        value: _receiveEnabled,
+        onChanged: (v) => setState(() => _receiveEnabled = v),
+        title: const Text('收信（IMAP：拉取收件箱、参与学习）'),
+        dense: true,
+      ),
+      SizedBox(height: 12),
+      Row(
         children: [
-          SwitchListTile(
-            value: _receiveEnabled,
-            onChanged: (v) => setState(() => _receiveEnabled = v),
-            title: const Text('收信（IMAP：拉取收件箱、参与学习）'),
-            dense: true,
+          Expanded(
+            child: _field(
+              _imapHost,
+              'IMAP 服务器，如 imap.qq.com',
+              onChanged: (_) => _hostsTouched = true,
+            ),
           ),
-          Row(children: [
-            Expanded(
-                child: _field(_imapHost, 'IMAP 服务器，如 imap.qq.com',
-                    onChanged: (_) => _hostsTouched = true)),
-            const SizedBox(width: 12),
-            SizedBox(
-                width: 120,
-                child: _field(_imapPort, '端口', num: true,
-                    onChanged: (_) => _hostsTouched = true)),
-          ]),
-          SwitchListTile(
-            value: _imapSecure,
-            onChanged: (v) => setState(() {
-              _imapSecure = v;
-              _hostsTouched = true;
-            }),
-            title: const Text('IMAP 使用 SSL（993 端口通常开启）'),
-            dense: true,
-          ),
-          _field(
-            _learnFolders,
-            '历史学习文件夹（逗号分隔，默认 Sent）',
-            helper: '文件夹名因邮箱服务商而异：Gmail 为 [Gmail]/Sent Mail'
-                '（中文账号为 [Gmail]/已发送邮件）、QQ/163 为 Sent Messages、'
-                'Outlook 为 Sent。常见命名会自动匹配，不确定可点下方按钮'
-                '从服务器选取',
-            onChanged: (_) => _foldersTouched = true,
-          ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              icon: const Icon(Icons.folder_open),
-              label: const Text('从服务器读取文件夹列表'),
-              onPressed: _pickFoldersFromServer,
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 120,
+            child: _field(
+              _imapPort,
+              '端口',
+              num: true,
+              onChanged: (_) => _hostsTouched = true,
             ),
           ),
         ],
-      );
+      ),
+      SwitchListTile(
+        value: _imapSecure,
+        onChanged: (v) => setState(() {
+          _imapSecure = v;
+          _hostsTouched = true;
+        }),
+        title: const Text('IMAP 使用 SSL（993 端口通常开启）'),
+        dense: true,
+      ),
+      SizedBox(height: 12),
+      _field(
+        _learnFolders,
+        '历史学习文件夹（逗号分隔，默认 Sent）',
+        helper:
+            '文件夹名因邮箱服务商而异：Gmail 为 [Gmail]/Sent Mail'
+            '（中文账号为 [Gmail]/已发送邮件）、QQ/163 为 Sent Messages、'
+            'Outlook 为 Sent。常见命名会自动匹配，不确定可点下方按钮'
+            '从服务器选取',
+        onChanged: (_) => _foldersTouched = true,
+      ),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          icon: const Icon(Icons.folder_open),
+          label: const Text('从服务器读取文件夹列表'),
+          onPressed: _pickFoldersFromServer,
+        ),
+      ),
+    ],
+  );
 
   Widget _sendPane() => Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      SwitchListTile(
+        value: _sendEnabled,
+        onChanged: (v) => setState(() => _sendEnabled = v),
+        title: const Text('发信（SMTP：可用于发出回复）'),
+        dense: true,
+      ),
+      Row(
         children: [
-          SwitchListTile(
-            value: _sendEnabled,
-            onChanged: (v) => setState(() => _sendEnabled = v),
-            title: const Text('发信（SMTP：可用于发出回复）'),
-            dense: true,
+          Expanded(
+            child: _field(
+              _smtpHost,
+              'SMTP 服务器，如 smtp.qq.com（只收信可留空）',
+              onChanged: (_) => _hostsTouched = true,
+            ),
           ),
-          Row(children: [
-            Expanded(
-                child: _field(
-                    _smtpHost, 'SMTP 服务器，如 smtp.qq.com（只收信可留空）',
-                    onChanged: (_) => _hostsTouched = true)),
-            const SizedBox(width: 12),
-            SizedBox(
-                width: 120,
-                child: _field(_smtpPort, '端口', num: true,
-                    onChanged: (_) => _hostsTouched = true)),
-          ]),
-          SwitchListTile(
-            value: _smtpSecure,
-            onChanged: (v) => setState(() {
-              _smtpSecure = v;
-              _hostsTouched = true;
-            }),
-            title: const Text('SMTP 加密（465=SSL / 587=STARTTLS）'),
-            dense: true,
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 120,
+            child: _field(
+              _smtpPort,
+              '端口',
+              num: true,
+              onChanged: (_) => _hostsTouched = true,
+            ),
           ),
         ],
-      );
+      ),
+      SwitchListTile(
+        value: _smtpSecure,
+        onChanged: (v) => setState(() {
+          _smtpSecure = v;
+          _hostsTouched = true;
+        }),
+        title: const Text('SMTP 加密（465=SSL / 587=STARTTLS）'),
+        dense: true,
+      ),
+    ],
+  );
 
-  Widget _field(TextEditingController c, String label,
-          {bool obscure = false,
-          bool num = false,
-          String? helper,
-          ValueChanged<String>? onChanged}) =>
-      Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: TextField(
-          controller: c,
-          obscureText: obscure,
-          keyboardType: num ? TextInputType.number : null,
-          onChanged: onChanged,
-          decoration: InputDecoration(
-            labelText: label,
-            helperText: helper,
-            border: const OutlineInputBorder(),
-            isDense: true,
-          ),
-        ),
-      );
+  Widget _field(
+    TextEditingController c,
+    String label, {
+    bool obscure = false,
+    bool num = false,
+    String? helper,
+    ValueChanged<String>? onChanged,
+  }) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: TextField(
+      controller: c,
+      obscureText: obscure,
+      keyboardType: num ? TextInputType.number : null,
+      onChanged: onChanged,
+      decoration: InputDecoration(
+        labelText: label,
+        helperText: helper,
+        border: const OutlineInputBorder(),
+        isDense: true,
+      ),
+    ),
+  );
 }
