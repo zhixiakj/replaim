@@ -15,6 +15,7 @@ class MailProviderPreset {
     this.smtpPort = 465,
     this.smtpSecure = true,
     required this.sentFolders,
+    this.useOAuth = false,
   });
 
   final String label;
@@ -31,6 +32,10 @@ class MailProviderPreset {
 
   /// 该服务商「已发送」文件夹的常见名字（可多个，作为学习文件夹候选）。
   final List<String> sentFolders;
+
+  /// 该服务商是否要求 OAuth2 登录（微软已禁用 Basic Auth，密码必被拒绝）。
+  /// 命中预设时自动切到 OAuth 模式，仍可在账号弹窗里手动改回。
+  final bool useOAuth;
 }
 
 const kMailProviderPresets = <MailProviderPreset>[
@@ -49,6 +54,7 @@ const kMailProviderPresets = <MailProviderPreset>[
     smtpHost: 'smtp.office365.com',
     smtpPort: 587,
     sentFolders: ['Sent', 'Sent Items'],
+    useOAuth: true,
   ),
   MailProviderPreset(
     label: 'QQ 邮箱',

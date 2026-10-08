@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:enough_mail/enough_mail.dart' as mail;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -8,6 +9,7 @@ import '../../providers/app_providers.dart';
 import '../../services/id_gen.dart';
 import '../../services/mail_provider_presets.dart';
 import '../../services/mail_service.dart';
+import '../../services/microsoft_oauth.dart';
 
 /// 空间管理：空间列表 + 空间详情（账号 / LLM 分配 / 默认发信账号 / 学习偏好）。
 ///
@@ -399,7 +401,7 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
       builder: (context) => _AccountDialog(
         space: space,
         existing: existing,
-        onSaved: (account, password) async {
+        onSaved: (account, password, oauthToken) async {
           final fresh = ref.read(spacesProvider).byId(space.id);
           if (fresh == null) return;
           final i = fresh.accounts.indexWhere((a) => a.id == account.id);
@@ -417,6 +419,16 @@ class _SpaceDetailState extends ConsumerState<_SpaceDetail> {
             await ref
                 .read(secretsProvider.notifier)
                 .saveMailPassword(account.id, password);
+          }
+          if (account.authType == kAuthTypeOauth) {
+            if (oauthToken != null) {
+              await ref
+                  .read(secretsProvider.notifier)
+                  .saveMailOauth(account.id, oauthToken.toString());
+            }
+          } else {
+            // 切回密码模式：清掉旧 OAuth 令牌，避免残留失效凭证。
+            await ref.read(secretsProvider.notifier).clearMailOauth(account.id);
           }
         },
       ),
@@ -604,7 +616,8 @@ class _AccountDialog extends ConsumerStatefulWidget {
 
   final MailSpace space;
   final MailAccountConfig? existing;
-  final Future<void> Function(MailAccountConfig account, String? password)
+  final Future<void> Function(
+      MailAccountConfig account, String? password, mail.OauthToken? oauthToken)
       onSaved;
 
   @override
@@ -620,6 +633,7 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
   late final TextEditingController _smtpPort;
   late final TextEditingController _password;
   late final TextEditingController _learnFolders;
+  late final TextEditingController _oauthClientId;
 
   bool _imapSecure = true;
   bool _smtpSecure = true;
@@ -627,6 +641,21 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
   bool _sendEnabled = true;
   bool _testing = false;
   String? _testResult;
+
+  /// OAuth2 登录（Outlook 必需）还是密码 / 授权码。
+  bool _useOAuth = false;
+
+  /// 本次会话里刚授权、尚未保存的 token（测试连接 / 保存时用）。
+  mail.OauthToken? _pendingToken;
+
+  /// 授权流程进行中（浏览器等待用户操作）。
+  bool _authorizing = false;
+
+  /// 登录方式是否被用户手动改过；未改过时允许预设自动切换。
+  bool _authTouched = false;
+
+  /// 当前选中 tab：0 = 收信（IMAP），1 = 发信（SMTP）。
+  int _tabIndex = 0;
 
   /// 服务器地址 / 学习文件夹是否被用户手动改过；未改过时允许按邮箱
   /// 域名自动套用服务商预设（编辑已有账号时视为已手动定制，不覆盖）。
@@ -657,6 +686,7 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
     _smtpPort = TextEditingController(text: '${m?.smtpPort ?? 465}');
     _password = TextEditingController();
     _learnFolders = TextEditingController(text: m?.learnFolders.join(', ') ?? '');
+    _oauthClientId = TextEditingController(text: m?.oauthClientId ?? '');
     if (m != null &&
         (ref.read(secretsProvider).mailPasswords[m.id] ?? '').isNotEmpty) {
       _password.text = _pwdMask;
@@ -665,8 +695,10 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
     _smtpSecure = m?.smtpSecure ?? true;
     _receiveEnabled = m?.receiveEnabled ?? true;
     _sendEnabled = m?.sendEnabled ?? true;
+    _useOAuth = m?.authType == kAuthTypeOauth;
     _hostsTouched = m != null;
     _foldersTouched = m != null;
+    _authTouched = m != null;
     // 新建账号时：输入到完整邮箱地址即自动套用服务商预设。
     _email.addListener(_applyPreset);
   }
@@ -676,7 +708,7 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
     _email.removeListener(_applyPreset);
     for (final c in [
       _email, _displayName, _imapHost, _imapPort, _smtpHost, _smtpPort,
-      _password, _learnFolders,
+      _password, _learnFolders, _oauthClientId,
     ]) {
       c.dispose();
     }
@@ -701,6 +733,10 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
     if (!_foldersTouched) {
       _learnFolders.text = preset.sentFolders.join(', ');
     }
+    // Outlook 等预设要求 OAuth2（微软已禁用密码登录）。
+    if (!_authTouched && preset.useOAuth != _useOAuth) {
+      setState(() => _useOAuth = preset.useOAuth);
+    }
   }
 
   /// 逗号分隔输入解析为文件夹名列表（去空白，忽略空段）。
@@ -724,6 +760,8 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
     receiveEnabled: _receiveEnabled,
     sendEnabled: _sendEnabled,
     learnFolders: _parseFolders().isEmpty ? const ['Sent'] : _parseFolders(),
+    authType: _useOAuth ? kAuthTypeOauth : kAuthTypePassword,
+    oauthClientId: _oauthClientId.text.trim(),
   );
 
   Future<void> _save() async {
@@ -732,22 +770,78 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
           const SnackBar(content: Text('请填写邮箱地址')));
       return;
     }
+    if (_useOAuth) {
+      if (_oauthClientId.text.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('请填写 Azure 应用客户端 ID')));
+        return;
+      }
+      if (!_hasOAuthToken) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('请先点击「登录 Microsoft 账号」完成授权')));
+        return;
+      }
+    }
     final account = _buildFromForm();
-    final password = _effectivePassword ??
-        ref.read(secretsProvider).mailPasswords[account.id];
-    // 对话框即将关闭：先取根级 messenger 与密码，保存后再异步核对。
+    final password = _effectivePassword;
+    // 对话框即将关闭：先取根级 messenger 与测试用凭证，保存后再异步核对。
     final messenger = ScaffoldMessenger.of(context);
+    final svc = _mailServiceFor(account);
     Navigator.pop(context);
-    await widget.onSaved(account, _effectivePassword);
-    unawaited(_validateFolders(messenger, account, password));
+    await widget.onSaved(account, password, _pendingToken);
+    unawaited(_validateFolders(messenger, account, svc));
+  }
+
+  /// 按当前表单状态组装 MailService（OAuth 模式带刚授权的待存 token，
+  /// 密码模式带表单里新输入的密码），供测试 / 保存后核对复用。
+  MailService _mailServiceFor(MailAccountConfig account) =>
+      ref.read(secretsProvider.notifier).buildMailService(
+        account,
+        passwordOverride: _effectivePassword,
+        oauthOverride: _pendingToken,
+      );
+
+  /// 是否已有可用的 OAuth 令牌（本次刚授权，或钥匙串里已存）。
+  bool get _hasOAuthToken =>
+      _pendingToken != null ||
+      parseOauthToken(
+              ref.watch(secretsProvider).mailOauth[widget.existing?.id]) !=
+          null;
+
+  /// 走浏览器完成 Microsoft OAuth2 授权（授权码 + PKCE，本机回环接收）。
+  Future<void> _authorize() async {
+    final clientId = _oauthClientId.text.trim();
+    if (clientId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('请先填写 Azure 应用客户端 ID')));
+      return;
+    }
+    setState(() => _authorizing = true);
+    try {
+      final token = await MicrosoftOAuth.authorize(
+          clientId: clientId, emailHint: _email.text.trim());
+      if (!mounted) return;
+      final expiry =
+          token.expiresDateTime.toLocal().toString().substring(0, 16);
+      setState(() {
+        _authorizing = false;
+        _pendingToken = token;
+        _testResult = '✓ Microsoft 授权成功（令牌有效期至 $expiry，到期自动续期）';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _authorizing = false;
+        _testResult = '授权失败：$e';
+      });
+    }
   }
 
   /// 保存后异步核对学习文件夹名：LIST 服务器文件夹，用 matchMailboxName
   /// 校验；连不上则跳过（「测试连接」里也会核对）。只提示、不阻塞。
-  /// [password] 必须在对话框关闭前取好（销毁后不能再读 ref/controller）。
+  /// [svc] 与凭证必须在对话框关闭前构造好（销毁后不能再读 ref/controller）。
   Future<void> _validateFolders(ScaffoldMessengerState messenger,
-      MailAccountConfig account, String? password) async {
-    final svc = MailService(account, password);
+      MailAccountConfig account, MailService svc) async {
     if (!svc.isReceiveReady) return;
     try {
       final serverFolders = await svc.listFolders();
@@ -770,10 +864,7 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
   Future<void> _test() async {
     setState(() => _testing = true);
     final account = _buildFromForm();
-    // 密码框只有掩码或留空时用已存密码测试。
-    final password = _effectivePassword ??
-        ref.read(secretsProvider).mailPasswords[account.id];
-    final svc = MailService(account, password);
+    final svc = _mailServiceFor(account);
     var result = await svc.testConnection();
     if (result == null) {
       // 连接成功，顺带核对学习文件夹名（一次额外连接，手动触发可接受）。
@@ -803,12 +894,12 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
   /// 带 `\Sent` 特殊标记的文件夹标注「服务器已发送」。
   Future<void> _pickFoldersFromServer() async {
     final account = _buildFromForm();
-    final password = _effectivePassword ??
-        ref.read(secretsProvider).mailPasswords[account.id];
-    final svc = MailService(account, password);
+    final svc = _mailServiceFor(account);
     if (!svc.isReceiveReady) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('请先填写邮箱地址、IMAP 服务器和密码')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(_useOAuth
+              ? '请先填写邮箱地址并完成 Microsoft 授权'
+              : '请先填写邮箱地址、IMAP 服务器和密码')));
       return;
     }
     try {
@@ -889,6 +980,39 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
         : '尚未保存密码';
   }
 
+  /// OAuth2 模式的凭证区：Azure 客户端 ID + 浏览器授权按钮 + 授权状态。
+  List<Widget> _oauthPane() => [
+        _field(
+          _oauthClientId,
+          'Azure 应用客户端 ID',
+          helper: 'Azure 门户注册「移动和桌面应用」获得（重定向 URI 填 '
+              'http://localhost，账号类型含个人 Microsoft 帐户）；'
+              '多个 Outlook 账号可复用同一个 ID',
+        ),
+        const SizedBox(height: 4),
+        OutlinedButton.icon(
+          onPressed: _authorizing ? null : _authorize,
+          icon: _authorizing
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.login),
+          label: Text(_authorizing
+              ? '等待浏览器完成授权…（最多 5 分钟）'
+              : (_hasOAuthToken ? '重新登录 Microsoft 账号' : '登录 Microsoft 账号')),
+        ),
+        if (!_hasOAuthToken && !_authorizing)
+          Padding(
+            padding: const EdgeInsets.only(top: 6, left: 4),
+            child: Text(
+              '尚未授权：保存前需完成一次浏览器登录（Outlook 还需先在网页版'
+              ' 设置里开启 IMAP）',
+              style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
+            ),
+          ),
+      ];
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -906,76 +1030,40 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
                   helper: '常见邮箱（Gmail / QQ / 163 / Outlook 等）'
                       '输入地址后自动填充下方服务器与学习文件夹'),
               _field(_displayName, '发件显示名（可选）'),
-              Row(children: [
-                Expanded(
-                    child: _field(_imapHost, 'IMAP 服务器，如 imap.qq.com',
-                        onChanged: (_) => _hostsTouched = true)),
-                const SizedBox(width: 12),
-                SizedBox(
-                    width: 120,
-                    child: _field(_imapPort, '端口', num: true,
-                        onChanged: (_) => _hostsTouched = true)),
-              ]),
               SwitchListTile(
-                value: _imapSecure,
+                value: _useOAuth,
                 onChanged: (v) => setState(() {
-                  _imapSecure = v;
-                  _hostsTouched = true;
+                  _useOAuth = v;
+                  _authTouched = true;
                 }),
-                title: const Text('IMAP 使用 SSL（993 端口通常开启）'),
+                title:
+                    const Text('OAuth2 登录（Outlook 必需：微软已禁用密码登录）'),
                 dense: true,
               ),
-              Row(children: [
-                Expanded(
-                    child: _field(
-                        _smtpHost, 'SMTP 服务器，如 smtp.qq.com（只收信可留空）',
-                        onChanged: (_) => _hostsTouched = true)),
-                const SizedBox(width: 12),
-                SizedBox(
-                    width: 120,
-                    child: _field(_smtpPort, '端口', num: true,
-                        onChanged: (_) => _hostsTouched = true)),
-              ]),
-              SwitchListTile(
-                value: _smtpSecure,
-                onChanged: (v) => setState(() {
-                  _smtpSecure = v;
-                  _hostsTouched = true;
-                }),
-                title: const Text('SMTP 加密（465=SSL / 587=STARTTLS）'),
-                dense: true,
-              ),
-              _field(_password, '密码 / 授权码',
-                  obscure: true, helper: _passwordHelper),
-              SwitchListTile(
-                value: _receiveEnabled,
-                onChanged: (v) => setState(() => _receiveEnabled = v),
-                title: const Text('收信（IMAP：拉取收件箱、参与学习）'),
-                dense: true,
-              ),
-              _field(
-                _learnFolders,
-                '历史学习文件夹（逗号分隔，默认 Sent）',
-                helper: '文件夹名因邮箱服务商而异：Gmail 为 [Gmail]/Sent Mail'
-                    '（中文账号为 [Gmail]/已发送邮件）、QQ/163 为 Sent Messages、'
-                    'Outlook 为 Sent。常见命名会自动匹配，不确定可点下方按钮'
-                    '从服务器选取',
-                onChanged: (_) => _foldersTouched = true,
-              ),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  icon: const Icon(Icons.folder_open),
-                  label: const Text('从服务器读取文件夹列表'),
-                  onPressed: _pickFoldersFromServer,
+              if (_useOAuth) ..._oauthPane()
+              else
+                _field(_password, '密码 / 授权码',
+                    obscure: true, helper: _passwordHelper),
+              // 收信 / 发信配置按 tab 分组。不用 TabBarView：它需要有界
+              // 高度，而两个 tab 内容高度差异大（收信 tab 多出学习文件夹），
+              // 固定高度会让发信 tab 大量留白，故按索引切换内容、用
+              // AnimatedSize 平滑过渡高度。
+              DefaultTabController(
+                length: 2,
+                child: TabBar(
+                  tabs: const [
+                    Tab(text: '收信（IMAP）'),
+                    Tab(text: '发信（SMTP）'),
+                  ],
+                  onTap: (index) => setState(() => _tabIndex = index),
                 ),
               ),
-              SwitchListTile(
-                value: _sendEnabled,
-                onChanged: (v) => setState(() => _sendEnabled = v),
-                title: const Text('发信（SMTP：可用于发出回复）'),
-                dense: true,
+              AnimatedSize(
+                duration: const Duration(milliseconds: 180),
+                alignment: Alignment.topCenter,
+                child: _tabIndex == 0 ? _receivePane() : _sendPane(),
               ),
+              const SizedBox(height: 6),
               OutlinedButton.icon(
                 onPressed: _testing ? null : _test,
                 icon: _testing
@@ -1016,6 +1104,88 @@ class _AccountDialogState extends ConsumerState<_AccountDialog> {
       ],
     );
   }
+
+  Widget _receivePane() => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SwitchListTile(
+            value: _receiveEnabled,
+            onChanged: (v) => setState(() => _receiveEnabled = v),
+            title: const Text('收信（IMAP：拉取收件箱、参与学习）'),
+            dense: true,
+          ),
+          Row(children: [
+            Expanded(
+                child: _field(_imapHost, 'IMAP 服务器，如 imap.qq.com',
+                    onChanged: (_) => _hostsTouched = true)),
+            const SizedBox(width: 12),
+            SizedBox(
+                width: 120,
+                child: _field(_imapPort, '端口', num: true,
+                    onChanged: (_) => _hostsTouched = true)),
+          ]),
+          SwitchListTile(
+            value: _imapSecure,
+            onChanged: (v) => setState(() {
+              _imapSecure = v;
+              _hostsTouched = true;
+            }),
+            title: const Text('IMAP 使用 SSL（993 端口通常开启）'),
+            dense: true,
+          ),
+          _field(
+            _learnFolders,
+            '历史学习文件夹（逗号分隔，默认 Sent）',
+            helper: '文件夹名因邮箱服务商而异：Gmail 为 [Gmail]/Sent Mail'
+                '（中文账号为 [Gmail]/已发送邮件）、QQ/163 为 Sent Messages、'
+                'Outlook 为 Sent。常见命名会自动匹配，不确定可点下方按钮'
+                '从服务器选取',
+            onChanged: (_) => _foldersTouched = true,
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              icon: const Icon(Icons.folder_open),
+              label: const Text('从服务器读取文件夹列表'),
+              onPressed: _pickFoldersFromServer,
+            ),
+          ),
+        ],
+      );
+
+  Widget _sendPane() => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SwitchListTile(
+            value: _sendEnabled,
+            onChanged: (v) => setState(() => _sendEnabled = v),
+            title: const Text('发信（SMTP：可用于发出回复）'),
+            dense: true,
+          ),
+          Row(children: [
+            Expanded(
+                child: _field(
+                    _smtpHost, 'SMTP 服务器，如 smtp.qq.com（只收信可留空）',
+                    onChanged: (_) => _hostsTouched = true)),
+            const SizedBox(width: 12),
+            SizedBox(
+                width: 120,
+                child: _field(_smtpPort, '端口', num: true,
+                    onChanged: (_) => _hostsTouched = true)),
+          ]),
+          SwitchListTile(
+            value: _smtpSecure,
+            onChanged: (v) => setState(() {
+              _smtpSecure = v;
+              _hostsTouched = true;
+            }),
+            title: const Text('SMTP 加密（465=SSL / 587=STARTTLS）'),
+            dense: true,
+          ),
+        ],
+      );
 
   Widget _field(TextEditingController c, String label,
           {bool obscure = false,

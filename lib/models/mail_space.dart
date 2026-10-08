@@ -109,6 +109,10 @@ class MailSpace {
   }
 }
 
+/// 登录方式：密码 / 授权码（Basic Auth）或 OAuth2（XOAUTH2，Outlook 必需）。
+const String kAuthTypePassword = 'password';
+const String kAuthTypeOauth = 'oauth';
+
 /// 邮箱账号（IMAP 收 + SMTP 发），归属某个空间。
 class MailAccountConfig {
   const MailAccountConfig({
@@ -124,6 +128,8 @@ class MailAccountConfig {
     this.receiveEnabled = true,
     this.sendEnabled = true,
     this.learnFolders = const ['Sent'],
+    this.authType = kAuthTypePassword,
+    this.oauthClientId = '',
   });
 
   /// 账号 ID（acct_ 前缀），密码等敏感信息以此作为命名空间键。
@@ -159,6 +165,15 @@ class MailAccountConfig {
   /// 实际解析见 MailService.matchMailboxName 的三轮匹配。
   final List<String> learnFolders;
 
+  /// 登录方式：[kAuthTypePassword]（密码/授权码）或 [kAuthTypeOauth]
+  /// （OAuth2 XOAUTH2，Outlook 必需——微软已禁用 Basic Auth）。
+  /// OAuth 的令牌另存于安全存储（`mail_oauth.<accountId>`）。
+  final String authType;
+
+  /// OAuth2 模式下的 Azure 应用（客户端）ID。公共客户端 + PKCE 下
+  /// 客户端 ID 不是机密，存 YAML 即可。
+  final String oauthClientId;
+
   /// 收信配置是否完整（密码另存于安全存储，由 MailService 层校验）。
   bool get isReceiveConfigured =>
       email.isNotEmpty && imapHost.isNotEmpty;
@@ -180,6 +195,8 @@ class MailAccountConfig {
         'receive_enabled': receiveEnabled,
         'send_enabled': sendEnabled,
         'learn_folders': learnFolders,
+        'auth_type': authType,
+        'oauth_client_id': oauthClientId,
       };
 
   static MailAccountConfig fromMap(Map<dynamic, dynamic> map,
@@ -201,6 +218,11 @@ class MailAccountConfig {
                 .toList() ??
             fallbackLearnFolders ??
             const ['Sent'],
+        // 旧配置无此键：缺省密码模式，行为与升级前完全一致。
+        authType: (map['auth_type'] as String?) == kAuthTypeOauth
+            ? kAuthTypeOauth
+            : kAuthTypePassword,
+        oauthClientId: map['oauth_client_id'] as String? ?? '',
       );
 
   MailAccountConfig copyWith({
@@ -216,6 +238,8 @@ class MailAccountConfig {
     bool? receiveEnabled,
     bool? sendEnabled,
     List<String>? learnFolders,
+    String? authType,
+    String? oauthClientId,
   }) =>
       MailAccountConfig(
         id: id ?? this.id,
@@ -230,6 +254,8 @@ class MailAccountConfig {
         receiveEnabled: receiveEnabled ?? this.receiveEnabled,
         sendEnabled: sendEnabled ?? this.sendEnabled,
         learnFolders: learnFolders ?? this.learnFolders,
+        authType: authType ?? this.authType,
+        oauthClientId: oauthClientId ?? this.oauthClientId,
       );
 }
 

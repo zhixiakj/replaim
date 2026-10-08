@@ -37,6 +37,57 @@
 密码与 API Key 按账号 / 模型 ID 命名存放于系统安全存储（flutter_secure_storage）。
 旧版单空间布局在启动时自动迁移为「默认空间」；全新安装由用户创建第一个空间。
 
+## 邮箱账号配置（Gmail / Outlook）
+
+在「空间」页添加邮箱账号时，输入完整邮箱地址会按服务商预设自动填充服务器地址、
+端口与学习文件夹，一般只需补齐凭证。两类常见邮箱的配置方式：
+
+### Gmail（密码 = 应用专用密码）
+
+1. Google 账号开启**两步验证**，再到「安全性 → 两步验证 → 应用专用密码」生成一个
+   16 位应用专用密码（没有两步验证就没有这个入口）。
+2. 账号弹窗里输入邮箱地址（自动填充 `imap.gmail.com:993` SSL / `smtp.gmail.com:465`
+   SSL 与已发送文件夹），**密码框粘贴应用专用密码**（不是账号登录密码）。
+3. 学习文件夹：Gmail 为 `[Gmail]/Sent Mail`（中文界面的账号为
+   `[Gmail]/已发送邮件`），应用会自动匹配常见命名；不确定就点
+   「从服务器读取文件夹列表」直接勾选。
+
+> 个人 Gmail 的 IMAP 默认开启；Google Workspace 组织账号可由管理员关闭
+> （Gmail 设置 → 转发和 POP/IMAP）。
+
+### Outlook / Hotmail / Live（OAuth2 登录）
+
+微软已**全面禁用** IMAP/SMTP 的密码登录（Basic Auth，应用密码同渠道一并废弃，
+个人账号 2024-09 起分阶段停用），Outlook 账号必须走 OAuth2：
+
+1. **开启 IMAP**：Outlook 网页版 → 设置 → 邮件 → 转发和 IMAP → 打开 IMAP 并保存
+   （默认关闭，不开则授权后也连不上）。
+2. **注册 Azure 应用拿客户端 ID**（一次性，多个 Outlook 账号可复用同一个）：
+   - [portal.azure.com](https://portal.azure.com) → 顶部搜索 `App registrations` →
+     **New registration**；帐户类型选「**Accounts in any organizational directory
+     and personal Microsoft accounts**」；重定向 URI 平台选
+     「**Mobile and desktop applications**」、填 `http://localhost`；注册后复制
+     **Application (client) ID**。
+   - **个人 Microsoft 账号且从未有过 Azure 目录会被拦**（提示「在目录外创建应用已
+     弃用」）：先注册 [Azure 免费账户](https://azure.microsoft.com/free)（需
+     Visa/MasterCard 验证身份，**不会自动扣费**，赠金到期即停、需手动升级），或改用
+     任一工作/学校 Microsoft 365 账号登录门户注册（客户端 ID 与所在租户无关，
+     个人账号照样能用）。
+   - 可选：API 权限添加 Office 365 Exchange Online → 委托权限
+     `IMAP.AccessAsUser.All`、`SMTP.Send`（个人账号可跳过，授权时动态同意；
+     组织账号若被拒需管理员「授予管理员同意」）。
+3. **Replaim 配置**：输入邮箱地址（自动填充 `outlook.office365.com:993` SSL /
+   `smtp.office365.com:587` STARTTLS）→ 保持「**OAuth2 登录**」开关开启 → 填入
+   客户端 ID → 点「**登录 Microsoft 账号**」在浏览器完成授权 → 「测试连接」验证。
+
+> 令牌存于系统钥匙串并**到期自动续期**，正常使用无需重复登录；只有修改密码或
+> 撤销授权后才需要重新点「登录 Microsoft 账号」。
+
+### 其它服务商
+
+QQ / 163 / 126 等在网页版邮箱设置（通常在「设置 → 账户」开启 IMAP/SMTP 服务）生成
+**授权码**，账号弹窗密码框填授权码即可，方式与 Gmail 相同。
+
 ## 开发
 
 ```bash
@@ -74,6 +125,7 @@ diff_match_patch（草稿对比）
 
 ## 边界（首版明确不做）
 
-OAuth 登录（用账号 + 授权码）、PDF/Word 知识库（首版 .md/.txt）、
-向量检索（规则生成为低频批处理，直接分块喂 LLM）、自动发送、团队协作、
-以附件形式转发的邮件（.eml 内嵌）不解析原始收件地址（服务器别名/转发已支持）。
+PDF/Word 知识库（首版 .md/.txt）、向量检索（规则生成为低频批处理，直接分块喂 LLM）、
+自动发送、团队协作、以附件形式转发的邮件（.eml 内嵌）不解析原始收件地址
+（服务器别名/转发已支持）。邮箱登录方式：Outlook 走 OAuth2（微软已禁用密码登录），
+Gmail / QQ / 163 等用应用专用密码 / 授权码，见上文「邮箱账号配置」。

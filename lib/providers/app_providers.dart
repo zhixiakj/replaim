@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:enough_mail/enough_mail.dart' as mail;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -18,6 +19,7 @@ import '../services/kb_service.dart';
 import '../services/llm_client.dart';
 import '../services/llm_profile_store.dart';
 import '../services/mail_service.dart';
+import '../services/microsoft_oauth.dart';
 import '../services/prompts.dart' as prompts;
 import '../services/rule_generators.dart';
 import '../services/rule_store.dart';
@@ -32,12 +34,16 @@ import '../services/stores.dart';
 class SecretsState {
   const SecretsState({
     this.mailPasswords = const {},
+    this.mailOauth = const {},
     this.llmApiKeys = const {},
     this.loaded = false,
   });
 
   /// accountId -> 邮箱密码 / 授权码。
   final Map<String, String> mailPasswords;
+
+  /// accountId -> OAuth 令牌 JSON（Outlook 等 OAuth2 登录的账号）。
+  final Map<String, String> mailOauth;
 
   /// llmProfileId -> API Key。
   final Map<String, String> llmApiKeys;
@@ -67,11 +73,12 @@ class SecretsController extends Notifier<SecretsState> {
       // 逐键读取需要 id 清单：账号来自 space.yaml，LLM 来自 llm_profiles.yaml。
       final spaces = await SpaceStore().loadAll();
       final profiles = await LlmProfileStore().loadAll();
-      final (mail, llm) = await _store.loadAll(
+      final (mail, oauth, llm) = await _store.loadAll(
         accountIds: spaces.expand((s) => s.accounts).map((a) => a.id),
         llmIds: profiles.map((p) => p.id),
       );
-      _set(SecretsState(mailPasswords: mail, llmApiKeys: llm, loaded: true));
+      _set(SecretsState(
+          mailPasswords: mail, mailOauth: oauth, llmApiKeys: llm, loaded: true));
     } catch (e, s) {
       // 钥匙串读取失败：按空表降级并置 loaded，避免调用方永久等待。
       debugPrint('[secrets] _bootstrap 读取钥匙串失败（按空密码处理）：$e\n$s');
@@ -85,6 +92,18 @@ class SecretsController extends Notifier<SecretsState> {
     await _store.saveMailPassword(accountId, value);
     _set(SecretsState(
       mailPasswords: {...state.mailPasswords, accountId: value},
+      mailOauth: state.mailOauth,
+      llmApiKeys: state.llmApiKeys,
+      loaded: true,
+    ));
+  }
+
+  /// 保存 / 更新 OAuth 令牌（token 自动续期后回写也走这里）。
+  Future<void> saveMailOauth(String accountId, String tokenJson) async {
+    await _store.saveMailOauth(accountId, tokenJson);
+    _set(SecretsState(
+      mailPasswords: state.mailPasswords,
+      mailOauth: {...state.mailOauth, accountId: tokenJson},
       llmApiKeys: state.llmApiKeys,
       loaded: true,
     ));
@@ -94,6 +113,7 @@ class SecretsController extends Notifier<SecretsState> {
     await _store.saveLlmApiKey(llmId, value);
     _set(SecretsState(
       mailPasswords: state.mailPasswords,
+      mailOauth: state.mailOauth,
       llmApiKeys: {...state.llmApiKeys, llmId: value},
       loaded: true,
     ));
@@ -101,8 +121,21 @@ class SecretsController extends Notifier<SecretsState> {
 
   Future<void> removeAccount(String accountId) async {
     await _store.deleteMailPassword(accountId);
+    await _store.deleteMailOauth(accountId);
     _set(SecretsState(
       mailPasswords: {...state.mailPasswords}..remove(accountId),
+      mailOauth: {...state.mailOauth}..remove(accountId),
+      llmApiKeys: state.llmApiKeys,
+      loaded: true,
+    ));
+  }
+
+  /// 清除 OAuth 令牌（账号切回密码模式时），密码 / LLM Key 不动。
+  Future<void> clearMailOauth(String accountId) async {
+    await _store.deleteMailOauth(accountId);
+    _set(SecretsState(
+      mailPasswords: state.mailPasswords,
+      mailOauth: {...state.mailOauth}..remove(accountId),
       llmApiKeys: state.llmApiKeys,
       loaded: true,
     ));
@@ -112,6 +145,7 @@ class SecretsController extends Notifier<SecretsState> {
     await _store.deleteLlmApiKey(llmId);
     _set(SecretsState(
       mailPasswords: state.mailPasswords,
+      mailOauth: state.mailOauth,
       llmApiKeys: {...state.llmApiKeys}..remove(llmId),
       loaded: true,
     ));
@@ -123,6 +157,30 @@ class SecretsController extends Notifier<SecretsState> {
     } catch (_) {
       // provider 已销毁（空间切换 / 热重载），丢弃过期的异步结果。
     }
+  }
+
+  /// 按账号登录方式组装 MailService：密码模式取密码表，OAuth2 模式
+  /// （Outlook 等）解析令牌表并挂刷新回写。收信 / 学习 / 发信 / 详情补取
+  /// 的全部入口统一走这里，避免各处重复拼凭证。
+  ///
+  /// [passwordOverride] / [oauthOverride] 供账号弹窗用尚未保存的新凭证
+  /// 做「测试连接」。
+  MailService buildMailService(
+    MailAccountConfig account, {
+    String? passwordOverride,
+    mail.OauthToken? oauthOverride,
+  }) {
+    if (account.authType == kAuthTypeOauth) {
+      final token =
+          oauthOverride ?? parseOauthToken(state.mailOauth[account.id]);
+      return MailService(account, null, oauthToken: token,
+          onOAuthTokenRefreshed: (t) async {
+        // token 自动续期后回写钥匙串（微软会轮转 refresh_token）。
+        await saveMailOauth(account.id, t.toString());
+      });
+    }
+    return MailService(
+        account, passwordOverride ?? state.mailPasswords[account.id]);
   }
 }
 
@@ -498,12 +556,12 @@ class LearnController extends Notifier<LearnRunState> {
           error: '请先在「空间」页创建空间并配置邮箱账号'));
       return;
     }
-    // 冷启动竞态防护：等钥匙串密码读入内存，再筛选可用账号。
+    // 冷启动竞态防护：等钥匙串凭证读入内存，再筛选可用账号。
     await ref.read(secretsProvider.notifier).ready;
-    final secrets = ref.read(secretsProvider);
+    final secretsNotifier = ref.read(secretsProvider.notifier);
     final usable = <MailAccountConfig>[];
     for (final a in space.accounts) {
-      if (MailService(a, secrets.mailPasswords[a.id]).isReceiveReady) {
+      if (secretsNotifier.buildMailService(a).isReceiveReady) {
         usable.add(a);
       }
     }
@@ -528,7 +586,7 @@ class LearnController extends Notifier<LearnRunState> {
       final all = <EmailSummary>[];
       final recoveredNotes = <String>[];
       for (final account in usable) {
-        final mail = MailService(account, secrets.mailPasswords[account.id]);
+        final mail = secretsNotifier.buildMailService(account);
         // 发件侧（账号级 learnFolders，文件夹名因服务商而异）：既是学习
         // 材料，也是来信配对的锚点（含已消费的发件——配对只认引用关系，
         // 与是否学过无关）。
@@ -909,21 +967,22 @@ class InboxController extends Notifier<InboxState> {
           error: '当前空间没有开启收信的账号', refreshed: true);
       return;
     }
-    // 冷启动竞态防护：等钥匙串密码读入内存，再判断配置完整性。
+    // 冷启动竞态防护：等钥匙串凭证读入内存，再判断配置完整性。
     await ref.read(secretsProvider.notifier).ready;
-    final secrets = ref.read(secretsProvider);
     _setDerived(state.messages, loading: true, refreshed: true);
     final addresses = space.accountAddresses;
     final store = InboxCacheStore(spaceId: space.id);
     final all = <EmailSummary>[];
     final errors = <String>[];
     for (final account in receivers) {
-      final pwd = secrets.mailPasswords[account.id];
-      final mail = MailService(account, pwd);
+      final mail =
+          ref.read(secretsProvider.notifier).buildMailService(account);
       if (!mail.isReceiveReady) {
-        final reason = account.isReceiveConfigured
-            ? '缺密码（钥匙串未返回该账号的授权码）'
-            : '缺 IMAP 服务器配置';
+        final reason = !account.isReceiveConfigured
+            ? '缺 IMAP 服务器配置'
+            : (account.authType == kAuthTypeOauth
+                ? '尚未完成 Microsoft 授权（在账号设置里重新登录）'
+                : '缺密码（钥匙串未返回该账号的授权码）');
         errors.add('${account.email}：配置不完整（$reason）');
         continue;
       }
@@ -1041,8 +1100,8 @@ class InboxController extends Notifier<InboxState> {
       if (space == null || account == null) return;
       // await 之后 provider 可能已随空间切换销毁，后续读取都由外层 catch 兜底。
       await ref.read(secretsProvider.notifier).ready;
-      final pwd = ref.read(secretsProvider).mailPasswords[account.id];
-      final svc = MailService(account, pwd);
+      final svc =
+          ref.read(secretsProvider.notifier).buildMailService(account);
       if (!svc.isReceiveReady) return;
       final updated = await svc.fetchByUid(
         folder: email.folder,
@@ -1289,8 +1348,8 @@ class DraftsController extends Notifier<DraftsState> {
       state = _copy(error: '当前空间没有可用于发信的账号（请在空间管理中开启账号的发信能力）');
       return false;
     }
-    final pwd = ref.read(secretsProvider).mailPasswords[sender.id];
-    final mail = MailService(sender, pwd);
+    final mail =
+        ref.read(secretsProvider.notifier).buildMailService(sender);
     try {
       await mail.sendReply(
         toAddress: record.toAddress,

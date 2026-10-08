@@ -61,6 +61,7 @@ class MemorySecretStorage implements SecretStorage {
 
 /// 敏感信息按命名空间键读写：
 /// - 邮箱密码：`mail_password.<accountId>`
+/// - 邮箱 OAuth 令牌（JSON）：`mail_oauth.<accountId>`
 /// - LLM API Key：`llm_api_key.<llmId>`
 ///
 /// 旧版扁平键（mail_password / llm_api_key）仅迁移时读取，不做清理。
@@ -69,6 +70,7 @@ class SecretStore {
       : _storage = storage ?? SecureSecretStorage();
 
   static const mailPrefix = 'mail_password.';
+  static const mailOauthPrefix = 'mail_oauth.';
   static const llmPrefix = 'llm_api_key.';
 
   /// 旧版扁平键（迁移读取）。
@@ -80,11 +82,18 @@ class SecretStore {
   Future<String?> mailPassword(String accountId) =>
       _storage.read(mailPrefix + accountId);
 
+  /// OAuth 令牌 JSON（OauthToken.toString() 的持久化格式）。
+  Future<String?> mailOauth(String accountId) =>
+      _storage.read(mailOauthPrefix + accountId);
+
   Future<String?> llmApiKey(String llmId) => _storage.read(llmPrefix + llmId);
 
   /// 空值 / null 表示删除该键。
   Future<void> saveMailPassword(String accountId, String? value) =>
       _write(mailPrefix + accountId, value);
+
+  Future<void> saveMailOauth(String accountId, String? value) =>
+      _write(mailOauthPrefix + accountId, value);
 
   Future<void> saveLlmApiKey(String llmId, String? value) =>
       _write(llmPrefix + llmId, value);
@@ -92,28 +101,35 @@ class SecretStore {
   Future<void> deleteMailPassword(String accountId) =>
       _storage.delete(mailPrefix + accountId);
 
+  Future<void> deleteMailOauth(String accountId) =>
+      _storage.delete(mailOauthPrefix + accountId);
+
   Future<void> deleteLlmApiKey(String llmId) =>
       _storage.delete(llmPrefix + llmId);
 
-  /// 按已知的账号 / LLM id 逐键读取，返回 (邮箱密码表, LLM Key 表)。
+  /// 按已知的账号 / LLM id 逐键读取，返回 (邮箱密码表, OAuth 令牌表, LLM Key 表)。
   ///
   /// 不用插件的 readAll：flutter_secure_storage 11.2.0（darwin 0.4.3）在
   /// macOS 传统钥匙串上 readAll 的组合查询恒返回 -50，而单键 read 正常。
-  Future<(Map<String, String>, Map<String, String>)> loadAll({
+  Future<(Map<String, String>, Map<String, String>, Map<String, String>)>
+      loadAll({
     required Iterable<String> accountIds,
     required Iterable<String> llmIds,
   }) async {
     final mail = <String, String>{};
+    final oauth = <String, String>{};
     for (final id in accountIds) {
       final v = await mailPassword(id);
       if (v != null && v.isNotEmpty) mail[id] = v;
+      final o = await mailOauth(id);
+      if (o != null && o.isNotEmpty) oauth[id] = o;
     }
     final llm = <String, String>{};
     for (final id in llmIds) {
       final v = await llmApiKey(id);
       if (v != null && v.isNotEmpty) llm[id] = v;
     }
-    return (mail, llm);
+    return (mail, oauth, llm);
   }
 
   Future<String?> legacyMailPassword() =>

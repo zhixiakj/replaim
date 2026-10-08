@@ -8,5 +8,8 @@
 	<true/>
 	<key>com.apple.security.network.client</key>
 	<true/>
+	<!-- OAuth 授权回调用：本机回环地址监听浏览器重定向 -->
+	<key>com.apple.security.network.server</key>
+	<true/>
 </dict>
 </plist>

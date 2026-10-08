@@ -5,39 +5,58 @@ import 'package:enough_mail/enough_mail.dart' show SocketType;
 
 import '../models/email_summary.dart';
 import '../models/mail_space.dart';
+import 'microsoft_oauth.dart';
 import 'stores.dart';
 
 /// 邮件服务：IMAP 收件 + SMTP 发件（enough_mail 高层 API）。
 ///
 /// 桌面端长期运行，每次操作独立连接、用完即断，避免 IMAP 空闲断连问题。
-/// 每个实例对应一个邮箱账号，由调用方按空间账号临时构造。
+/// 每个实例对应一个邮箱账号，由调用方临时构造（推荐经
+/// app_providers 的 buildMailService，它会按 authType 组装凭证）。
 class MailService {
-  MailService(this.config, this.password);
+  MailService(this.config, this.password,
+      {this.oauthToken, this.onOAuthTokenRefreshed});
 
   final MailAccountConfig config;
   final String? password;
 
+  /// OAuth2 模式（authType == oauth）的访问令牌；密码模式为 null。
+  final mail.OauthToken? oauthToken;
+
+  /// 令牌自动刷新成功后的持久化回调（把轮转后的新 token 写回钥匙串）。
+  final Future<void> Function(mail.OauthToken token)? onOAuthTokenRefreshed;
+
+  bool get _useOAuth => config.authType == kAuthTypeOauth;
+
   bool get isReceiveReady =>
-      config.isReceiveConfigured && (password?.isNotEmpty ?? false);
+      config.isReceiveConfigured &&
+      (_useOAuth ? oauthToken != null : (password?.isNotEmpty ?? false));
 
   bool get isSendReady =>
-      config.isSendConfigured && (password?.isNotEmpty ?? false);
+      config.isSendConfigured &&
+      (_useOAuth ? oauthToken != null : (password?.isNotEmpty ?? false));
 
-  mail.MailAccount _buildAccount() => mail.MailAccount.fromManualSettings(
-        name: config.displayName.isEmpty ? config.email : config.displayName,
-        email: config.email,
-        userName: config.email,
-        incomingHost: config.imapHost,
-        incomingPort: config.imapPort,
-        incomingSocketType: config.imapSecure ? SocketType.ssl : SocketType.plain,
-        // 纯收信账号 SMTP 可留空；enough_mail 要求非空，占位即可
-        // （SMTP 懒连接，发信前另有 isSendReady 校验拦截）。
-        outgoingHost:
-            config.smtpHost.isEmpty ? 'smtp.unset.invalid' : config.smtpHost,
-        outgoingPort: config.smtpPort,
-        outgoingSocketType: _smtpSocketType(),
-        password: password ?? '',
-      );
+  mail.MailAccount _buildAccount() {
+    final auth = _useOAuth && oauthToken != null
+        ? mail.OauthAuthentication(config.email, oauthToken!)
+        : mail.PlainAuthentication(config.email, password ?? '');
+    return mail.MailAccount.fromManualSettingsWithAuth(
+      name: config.displayName.isEmpty ? config.email : config.displayName,
+      email: config.email,
+      userName: config.email,
+      incomingHost: config.imapHost,
+      incomingPort: config.imapPort,
+      incomingSocketType:
+          config.imapSecure ? SocketType.ssl : SocketType.plain,
+      // 纯收信账号 SMTP 可留空；enough_mail 要求非空，占位即可
+      // （SMTP 懒连接，发信前另有 isSendReady 校验拦截）。
+      outgoingHost:
+          config.smtpHost.isEmpty ? 'smtp.unset.invalid' : config.smtpHost,
+      outgoingPort: config.smtpPort,
+      outgoingSocketType: _smtpSocketType(),
+      auth: auth,
+    );
+  }
 
   SocketType _smtpSocketType() {
     if (!config.smtpSecure) return SocketType.plain;
@@ -47,11 +66,38 @@ class MailService {
 
   Future<mail.MailClient> _connect({Duration timeout = const Duration(seconds: 20)}) async {
     if (!isReceiveReady) {
-      throw MailException('邮箱账号收信配置不完整（地址/IMAP 服务器/密码）');
+      throw MailException(_useOAuth
+          ? '该账号为 OAuth2 登录（Outlook），请先在账号设置里完成 Microsoft 授权'
+          : '邮箱账号收信配置不完整（地址/IMAP 服务器/密码）');
     }
-    final client = mail.MailClient(_buildAccount(), isLogEnabled: false);
+    // OAuth 模式：token 将在 15 分钟内过期时，enough_mail 在连接前调
+    // refresh 回调换新 token（微软会轮转 refresh_token，须整体持久化）。
+    final client = mail.MailClient(
+      _buildAccount(),
+      isLogEnabled: false,
+      refresh: _useOAuth && oauthToken != null ? _refreshOAuthToken : null,
+    );
     await client.connect(timeout: timeout);
     return client;
+  }
+
+  Future<mail.OauthToken> _refreshOAuthToken(
+      mail.MailClient client, mail.OauthToken expired) async {
+    final refreshed = await MicrosoftOAuth.refresh(
+      clientId: config.oauthClientId,
+      refreshToken: expired.refreshToken,
+    );
+    // enough_mail 内部 copyWith 只换 access token，轮转后的新 refresh_token
+    // 必须在这里写回钥匙串，否则下次续期仍拿旧值。
+    final persisted = onOAuthTokenRefreshed;
+    if (persisted != null) {
+      try {
+        await persisted(refreshed);
+      } catch (_) {
+        // 持久化失败不阻断本次连接（内存里已有新 token）。
+      }
+    }
+    return refreshed;
   }
 
   /// 测试 IMAP 连通性，返回错误信息（null = 成功）。
@@ -289,7 +335,9 @@ class MailService {
     List<String> ccAddresses = const [],
   }) async {
     if (!isSendReady) {
-      throw MailException('邮箱账号发信配置不完整（地址/SMTP 服务器/密码）');
+      throw MailException(_useOAuth
+          ? '该账号为 OAuth2 登录（Outlook），请先在账号设置里完成 Microsoft 授权'
+          : '邮箱账号发信配置不完整（地址/SMTP 服务器/密码）');
     }
     final client = await _connect();
     try {
