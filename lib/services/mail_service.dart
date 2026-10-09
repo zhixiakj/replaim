@@ -478,6 +478,11 @@ class MailService {
       });
 
   /// 选中文件夹后拉取最近 [limit] 封并转成应用模型。
+  ///
+  /// 用 UID 窗口（UID FETCH max(1, uidNext-limit):*）而不是序号分页：
+  /// Outlook 对空邮箱 / 越界序号的 FETCH 会回
+  /// "NO The specified message set is invalid."，而 UID 对不存在或
+  /// 越界的值按 RFC 静默不返回，不触发该校验。
   Future<List<EmailSummary>> _fetchSummaries(
     mail.MailClient client,
     mail.Mailbox mailbox,
@@ -488,11 +493,30 @@ class MailService {
   ) async {
     final sw = Stopwatch()..start();
     AppLog.log('mail', '开始拉取 ${config.email} $folder 最近 $limit 封全文…');
-    final messages = await client.fetchMessages(
-      mailbox: mailbox,
-      count: limit,
-      fetchPreference: mail.FetchPreference.fullWhenWithinSize,
-    );
+    final uidNext = mailbox.uidNext;
+    final messages = <mail.MimeMessage>[];
+    if (mailbox.messagesExists <= 0) {
+      AppLog.log('mail', '${config.email} $folder 为空文件夹，跳过 FETCH');
+    } else if (uidNext == null) {
+      // 服务器未报 UIDNEXT（极罕见）时退回序号路径兜底。
+      messages.addAll(await client.fetchMessages(
+        mailbox: mailbox,
+        count: limit,
+        fetchPreference: mail.FetchPreference.fullWhenWithinSize,
+      ));
+    } else if (uidNext > 1) {
+      final start = uidNext - limit < 1 ? 1 : uidNext - limit;
+      final fetched = await client.fetchMessageSequence(
+        mail.MessageSequence.fromRangeToLast(start, isUidSequence: true),
+        fetchPreference: mail.FetchPreference.fullWhenWithinSize,
+      );
+      // UID x:* 在 x 超过现存最大 UID 时仍会返回最后一封，需按窗口过滤。
+      messages.addAll(fetched.where((m) {
+        final uid = m.uid ?? 0;
+        return uid >= start && uid < uidNext;
+      }).toList()
+        ..sort((a, b) => (a.uid ?? 0).compareTo(b.uid ?? 0)));
+    }
     AppLog.log('mail', '拉取完成 ${config.email} $folder：'
         '${messages.length} 封（${sw.elapsedMilliseconds}ms）');
     return messages
