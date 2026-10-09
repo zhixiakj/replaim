@@ -2,11 +2,66 @@
 
 [English](README.md) | 简体中文
 
-面向跨境电商卖家的客服邮件 copilot 桌面应用（Flutter，macOS / Windows）。
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/zhixiakj/replaim?include_prereleases)](https://github.com/zhixiakj/replaim/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)](#下载与安装)
+[![Flutter](https://img.shields.io/badge/Flutter-3.47%2B-02569B?logo=flutter)](https://flutter.dev)
+
+面向跨境电商卖家的客服邮件 copilot 桌面应用（Flutter，macOS / Windows），免费开源
+（Apache-2.0）。
 
 **核心闭环**：接收邮件 → 从「历史邮件 + 知识库 + 自定义 Prompt」提炼**回复规则** →
 严格依据规则起草英文回复 → 人工编辑确认后 SMTP 发送 → 对比草稿与实发内容，
 **自动优化回复规则**。起草，不代发；中文操作台，英文输出。
+
+**为什么选 Replaim：**
+
+- **免费开源**（Apache-2.0）：无订阅、无服务端——自带任意 OpenAI 兼容的大模型
+  API Key，唯一运行成本是自己的 API 用量。
+- **数据本地化**：邮件、规则、知识库、草稿全部是本机 YAML 文件；密码与 API Key
+  存系统钥匙串。除连邮箱的 IMAP/SMTP 和你主动触发的大模型调用外，没有任何外发流量。
+- **学的是「你」的回法**：规则库从你真实的历史收发邮件提炼，每次改稿后自动继续优化。
+- **人工把关**：每封草稿都等你编辑确认，绝不自动发送。
+- **多品牌**：按店铺/品牌划分空间，规则、知识库、邮箱账号彼此隔离。
+
+## 截图
+
+<!-- TODO(作者): 截图放入 docs/screenshots/ 后取消注释。
+     1. inbox.png   聚合聊天式收件箱（线程上下文）
+2. draft.png   一键生成草稿 + 对话式改稿面板
+3. learn.png   学习中心运行中（带进度）
+4. rules.png   规则库（来源与版本历史）
+5. spaces.png  空间页 + 账号弹窗（收信/发信开关）
+6. demo.gif    30–60 秒端到端演示（收信 → 起草 → 编辑 → 发送）
+
+| 聊天式收件箱 | AI 起草 |
+|---|---|
+| ![收件箱](docs/screenshots/inbox.png) | ![草稿](docs/screenshots/draft.png) |
+
+| 学习中心 | 规则库 |
+|---|---|
+| ![学习](docs/screenshots/learn.png) | ![规则](docs/screenshots/rules.png) |
+
+端到端演示：![demo](docs/screenshots/demo.gif)
+-->
+
+## 下载与安装
+
+到 [Releases](https://github.com/zhixiakj/replaim/releases/latest) 页面下载最新版安装包：
+
+- **macOS**（Apple Silicon 与 Intel）：`replaim-vX.Y.Z-macos.dmg`——打开后把
+  **replaim** 拖进「应用程序」。
+- **Windows**（10/11，x64）：`replaim-vX.Y.Z-windows-x64.zip`——解压运行
+  `replaim.exe`（绿色便携版，无需安装）。
+
+安装包**尚未代码签名**，首次打开系统会拦截：
+
+- **macOS**：右键 App →「打开」→ 弹窗里再点一次「打开」即可；或在终端执行
+  `xattr -cr /Applications/replaim.app`；或「系统设置 → 隐私与安全性 → 仍要打开」。
+- **Windows**：SmartScreen 提示时点「更多信息」→「仍要运行」。
+
+首次使用：创建空间 → 添加邮箱账号（见[邮箱账号配置](#邮箱账号配置gmail--outlook)）→
+在设置里添加大模型 Profile（任意 OpenAI 兼容的 Base URL / 模型名 / API Key）。
 
 ## 功能
 
@@ -19,6 +74,16 @@
 | 知识库 | 导入 .md/.txt 文档（复制进应用目录），按内容 hash 跟踪变更，变更后可重新生成规则（按空间隔离） |
 | 学习中心 | 历史邮件增量学习（空间内全部账号逐一学习）：已消费邮件绝不重复使用；按时间升序处理、冲突时新邮件优先，防止旧邮件覆盖新规则 |
 | 设置 | 大模型 Profiles（可配置多个，OpenAI 兼容 Base URL / 模型名 / API Key，分配给各空间使用）、自定义 Prompt |
+
+## 横向对比
+
+| | Replaim | Superhuman / Shortwave | Gmail 快速回复模板 | 手动复制粘贴 ChatGPT |
+|---|---|---|---|---|
+| 价格 | 免费（开源）+ 自付 API 用量 | 约 $10–30 / 月 | 免费 | 手动折腾 |
+| 学习你的回信风格 | ✅ 从历史邮件提炼，持续自我优化 | 部分（云端 AI） | ❌ 静态模板 | ❌ 每次从零开始 |
+| 邮件数据在哪 | 100% 本地文件 | 服务商云端 | Google 云端 | 手动到处粘贴 |
+| 发送安全 | 只起草，每封都要人确认发送 | 有自动代发类功能 | 手动 | 手动 |
+| 多品牌（按店铺隔离规则/知识库/账号） | ✅ 空间 | ❌ | 按账号 | ❌ |
 
 ## 数据存放（全部本地）
 
@@ -88,6 +153,29 @@
 QQ / 163 / 126 等在网页版邮箱设置（通常在「设置 → 账户」开启 IMAP/SMTP 服务）生成
 **授权码**，账号弹窗密码框填授权码即可，方式与 Gmail 相同。
 
+## 常见问题
+
+**真的免费吗？有什么代价？**
+Apache-2.0 开源，无订阅、无任何人的服务端。你需要一个大模型 API Key（OpenAI、
+DeepSeek、GLM、Moonshot、本地 Ollama……凡 OpenAI 兼容均可），费用直接付给服务商——
+客服邮件这个量级通常一天几毛钱。
+
+**隐私怎么保障？**
+邮件、规则、知识库、草稿全部以 YAML 存在本机用户目录；密码、API Key、OAuth 令牌存
+系统钥匙串。对外流量只有两类：连你邮箱的 IMAP/SMTP，和你主动触发的大模型调用
+（把当前邮件内容 + 规则发到**你自己配置**的端点、用**你自己的** Key）。
+
+**支持哪些邮箱？**
+Gmail（应用专用密码）、Outlook / Hotmail / Live（OAuth2，微软已禁用密码登录）、
+QQ / 163 / 126（授权码），以及任何标准 IMAP/SMTP 服务商。见
+[邮箱账号配置](#邮箱账号配置gmail--outlook)。
+
+**界面是什么语言？**
+操作台为中文（面向中文卖家回复海外客户），草稿输出为英文。英文界面暂未提供。
+
+**会自动发信吗？**
+绝不。只起草；每一封都由人编辑确认后才发出。
+
 ## 开发
 
 ```bash
@@ -129,3 +217,8 @@ PDF/Word 知识库（首版 .md/.txt）、向量检索（规则生成为低频�
 自动发送、团队协作、以附件形式转发的邮件（.eml 内嵌）不解析原始收件地址
 （服务器别名/转发已支持）。邮箱登录方式：Outlook 走 OAuth2（微软已禁用密码登录），
 Gmail / QQ / 163 等用应用专用密码 / 授权码，见上文「邮箱账号配置」。
+
+## 许可证
+
+以 [Apache License 2.0](LICENSE) 开源发布。
+Copyright 2026 The Replaim Authors.

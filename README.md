@@ -2,12 +2,72 @@
 
 English | [简体中文](README.zh-CN.md)
 
-A desktop customer-support email copilot for cross-border e-commerce sellers (Flutter, macOS / Windows).
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/zhixiakj/replaim?include_prereleases)](https://github.com/zhixiakj/replaim/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)](#download--install)
+[![Flutter](https://img.shields.io/badge/Flutter-3.47%2B-02569B?logo=flutter)](https://flutter.dev)
+
+A free, open-source desktop customer-support email copilot for cross-border e-commerce sellers
+(Flutter, macOS / Windows).
 
 **Core loop**: receive emails → distill **reply rules** from *historical emails + knowledge base +
 custom prompts* → draft English replies strictly from the rules → human edit & confirm, then send
 via SMTP → compare the draft with what was actually sent and **auto-refine the reply rules**.
 It drafts, never auto-sends; Chinese-language cockpit, English output.
+
+**Why Replaim:**
+
+- **Free & open source** (Apache-2.0). No subscription, no server — bring your own
+  OpenAI-compatible LLM API key; the only running cost is your own API usage.
+- **Local-first.** Mail, rules, knowledge base and drafts are plain YAML files on your machine;
+  passwords and API keys live in the OS keychain. Nothing leaves the box except IMAP/SMTP and
+  the LLM calls you trigger.
+- **It learns *your* way of replying.** The rule library is distilled from your actual
+  sent/received history and keeps refining itself every time you edit a draft.
+- **Human in the loop.** Every draft waits for your edit and confirmation — Replaim never
+  auto-sends.
+- **Multi-brand.** Spaces keep rules, knowledge base and mail accounts separate per shop/brand.
+
+## Screenshots
+
+<!-- TODO(owner): capture screenshots into docs/screenshots/ and uncomment the block below.
+     1. inbox.png   — aggregated chat-style inbox with thread context
+     2. draft.png   — one-click draft generation + chat-style revision panel
+     3. learn.png   — Learn Center mid-run with progress
+     4. rules.png   — rule library with sources & version history
+     5. spaces.png  — spaces page with the account dialog (IMAP/SMTP toggles)
+     6. demo.gif    — 30–60s end-to-end demo (receive → draft → edit → send)
+
+| Inbox (chat-style) | Drafting with AI |
+|---|---|
+| ![Inbox](docs/screenshots/inbox.png) | ![Draft](docs/screenshots/draft.png) |
+
+| Learn Center | Rule Library |
+|---|---|
+| ![Learn](docs/screenshots/learn.png) | ![Rules](docs/screenshots/rules.png) |
+
+End-to-end demo: ![demo](docs/screenshots/demo.gif)
+-->
+
+## Download & Install
+
+Grab the latest binaries from the [Releases](https://github.com/zhixiakj/replaim/releases/latest) page:
+
+- **macOS** (Apple Silicon & Intel): `replaim-vX.Y.Z-macos.dmg` — open it and drag **replaim**
+  to Applications.
+- **Windows** (10/11, x64): `replaim-vX.Y.Z-windows-x64.zip` — unzip and run `replaim.exe`
+  (portable, no installer).
+
+The builds are **not code-signed** yet, so the OS will grumble on first launch:
+
+- **macOS**: right-click the app → **Open** → **Open** in the dialog (once is enough).
+  Alternatively run `xattr -cr /Applications/replaim.app` in Terminal, or use
+  System Settings → Privacy & Security → **Open Anyway**.
+- **Windows**: SmartScreen → **More info** → **Run anyway**.
+
+First launch: create a space → add an email account (see
+[Email Account Setup](#email-account-setup-gmail--outlook)) → add an LLM profile in Settings
+(any OpenAI-compatible Base URL / model name / API key).
 
 ## Features
 
@@ -20,6 +80,16 @@ It drafts, never auto-sends; Chinese-language cockpit, English output.
 | Knowledge Base | Import .md/.txt documents (copied into the app directory), track changes by content hash, regenerate rules after changes (isolated per space) |
 | Learn Center | Incremental learning from historical emails (across all accounts in the space): consumed emails are never reused; processed in chronological order with newer emails winning conflicts, so old mail can't overwrite newer rules |
 | Settings | LLM profiles (multiple, OpenAI-compatible Base URL / model name / API key, assigned to spaces), custom prompts |
+
+## How It Compares
+
+| | Replaim | Superhuman / Shortwave | Gmail canned replies | Copy-paste into ChatGPT |
+|---|---|---|---|---|
+| Price | Free (open source) + your own API usage | ≈ $10–30 / month | Free | Manual token fiddling |
+| Learns your reply style | ✅ distilled from your sent history, keeps self-refining | Partial (their cloud AI) | ❌ static templates | ❌ every thread starts from zero |
+| Where your mail lives | 100% local files | Provider cloud | Google cloud | Pasted around by hand |
+| Sending safety | Drafts only — a human confirms every send | Autopilot-style features | Manual | Manual |
+| Multi-brand (per-shop rules / KB / accounts) | ✅ Spaces | ❌ | Per account | ❌ |
 
 ## Data Storage (all local)
 
@@ -105,6 +175,31 @@ QQ / 163 / 126 etc. use an **authorization code** generated in the provider's
 webmail settings (usually under Settings → Account, where IMAP/SMTP service is
 enabled). Paste it into the password field, same as Gmail.
 
+## FAQ
+
+**Is it really free? What's the catch?**
+Apache-2.0 open source, no subscription, no server run by anyone. You do need an LLM API key
+(OpenAI, DeepSeek, GLM, Moonshot, a local Ollama… anything OpenAI-compatible) and you pay that
+provider directly for what you use — at support-mail volumes that's usually cents a day.
+
+**What about privacy?**
+Mail, rules, knowledge base and drafts are stored locally as YAML under your user profile;
+passwords, API keys and OAuth tokens live in the OS keychain. The only outbound traffic is
+IMAP/SMTP to your mail provider, and the LLM calls you trigger — which send the current
+email content plus rules to the endpoint *you* configured, with the key *you* supplied.
+
+**Which email providers are supported?**
+Gmail (app password), Outlook / Hotmail / Live (OAuth2 — Microsoft disabled password sign-in),
+QQ / 163 / 126 (authorization codes), and any standard IMAP/SMTP provider. See
+[Email Account Setup](#email-account-setup-gmail--outlook).
+
+**Which language is the UI in?**
+The cockpit is Chinese — built for Chinese-speaking sellers answering overseas customers —
+and drafts are written in English. An English UI is not available yet.
+
+**Does it ever send mail automatically?**
+Never. It drafts; a human edits and confirms every single send.
+
 ## Development
 
 ```bash
@@ -153,3 +248,8 @@ auto-sending, team collaboration, parsing embedded-.eml forwards (server
 alias/redirect forwarding is already supported). Sign-in methods: Outlook uses
 OAuth2 (Microsoft disabled password sign-in); Gmail / QQ / 163 etc. use app
 passwords / authorization codes — see "Email Account Setup" above.
+
+## License
+
+Released under the [Apache License 2.0](LICENSE).
+Copyright 2026 The Replaim Authors.
