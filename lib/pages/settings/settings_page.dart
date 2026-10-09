@@ -326,7 +326,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
     if (useLlm) {
       if (llm == null) {
-        _toast('请先配置大模型并分配给当前空间');
+        _toast(ref.read(llmUnavailableReasonProvider));
         return;
       }
       _toast('正在拆分规则…');

@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 ///
 ///   app_state.yaml             全局应用状态（当前空间 ID 等）
 ///   llm_profiles.yaml          全局 LLM Profile 注册表（非敏感字段）
+///   logs/app.log               应用运行日志（超限滚动为 app.log.1）
 ///   `spaces/<spaceId>/`        每个空间一个目录：
 ///     space.yaml               空间元数据 + 账号列表 + 学习偏好
 ///     rules/rules.yaml         本空间规则库（核心资产）
@@ -45,6 +46,7 @@ class AppPaths {
 
   String get appStateFile => p.join(root, 'app_state.yaml');
   String get llmProfilesFile => p.join(root, 'llm_profiles.yaml');
+  Directory get logsDir => Directory(p.join(root, 'logs'));
   String get spacesDir => p.join(root, 'spaces');
 
   // ---------------- 空间分区 ----------------

@@ -42,9 +42,6 @@ class MicrosoftOAuth {
     contentType: Headers.formUrlEncodedContentType,
   ));
 
-  /// 按旧 refresh token 键控的在途刷新请求：同账号并发建连时只发一次。
-  static final Map<String, Future<mail.OauthToken>> _refreshInFlight = {};
-
   /// 走浏览器完成授权并换取 token。
   ///
   /// [clientId] 是用户在 Azure 门户注册的应用（客户端）ID；
@@ -154,17 +151,17 @@ class MicrosoftOAuth {
 
   /// 用 refresh token 续期。微软会轮转 refresh_token，返回的 token 里
   /// 已是新的 refresh token，调用方必须整体持久化。
+  ///
+  /// 不做按 RT 的单飞去重：曾用 `_refreshInFlight` Map + whenComplete
+  /// 包装做并发去重，实测该包装与 Dio 的异步调度存在竞态——请求会在
+  /// 建立 socket 之前静默停滞，连挂在请求上的 `.timeout` 都不触发
+  /// （纯 Dart CLI 7/7 复现、去掉包装 3/3 恢复；Flutter 环境同样签名）。
+  /// 并发重复刷新的代价只是落败方收到一次 invalid_grant，下次自愈。
   static Future<mail.OauthToken> refresh({
     required String clientId,
     required String refreshToken,
-  }) {
-    final inFlight = _refreshInFlight[refreshToken];
-    if (inFlight != null) return inFlight;
-    final future = _doRefresh(clientId: clientId, refreshToken: refreshToken)
-        .whenComplete(() => _refreshInFlight.remove(refreshToken));
-    _refreshInFlight[refreshToken] = future;
-    return future;
-  }
+  }) =>
+      _doRefresh(clientId: clientId, refreshToken: refreshToken);
 
   static Future<mail.OauthToken> _doRefresh({
     required String clientId,
@@ -185,8 +182,17 @@ class MicrosoftOAuth {
       Map<String, String> form) async {
     final Response<Map<String, dynamic>> response;
     try {
-      response = await _dio.post<Map<String, dynamic>>(tokenEndpoint,
-          data: form);
+      // 整体 20s 硬超时：Dio 的 connectTimeout 只覆盖 TCP 建连（TUN/代理
+      // 环境下 TCP 会被本地秒接），TLS 握手阶段的黑洞没有任何库级超时
+      // 兜底——曾导致刷新请求无限挂死并卡住整个收件箱。这里也让
+      // _refreshInFlight 的单飞条目必定 settle，网络恢复后可自愈。
+      response = await _dio
+          .post<Map<String, dynamic>>(tokenEndpoint, data: form)
+          .timeout(const Duration(seconds: 20));
+    } on TimeoutException {
+      throw MicrosoftOAuthException(
+          '连接微软令牌服务超时（20 秒无响应）：直连可能被代理/VPN 拦截，'
+          '请检查代理软件（可尝试切换节点或全局模式）后重试');
     } on DioException catch (e) {
       // 4xx 响应的 body 里是 error / error_description（AADSTS 详情），
       // 必须透出让用户直接看到微软拒绝的原因（如帐户类型与端点不匹配）。

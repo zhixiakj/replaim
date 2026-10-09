@@ -1,7 +1,7 @@
-import 'package:flutter/foundation.dart';
 
 import '../models/email_summary.dart';
 import '../models/rule.dart';
+import 'app_log.dart';
 import 'json_extract.dart';
 import 'llm_client.dart';
 import 'prompts.dart' as prompts;
@@ -89,7 +89,7 @@ class RuleGenerators {
           incomingCount++;
         }
       }
-      debugPrint('[learn] 批次 ${i + 1}/${batches.length}：邮件 ${batch.length} 封'
+      AppLog.log('learn', '批次 ${i + 1}/${batches.length}：邮件 ${batch.length} 封'
           '（客户来信 $incomingCount、我方回复 ${batch.length - incomingCount}），'
           '日期 $dateRange');
       final batchText =
@@ -98,7 +98,7 @@ class RuleGenerators {
         LlmMessage.user(prompts.emailRulesPrompt(batchText, dateRange)),
       ]);
       final extracted = parseRuleItems(raw);
-      debugPrint('[learn] 批次 ${i + 1}/${batches.length}：提取 ${extracted.length} 条规则');
+      AppLog.log('learn', '批次 ${i + 1}/${batches.length}：提取 ${extracted.length} 条规则');
       if (extracted.isEmpty) continue;
 
       final messageIds = batch.map((e) => e.messageId).toList();
@@ -123,7 +123,7 @@ class RuleGenerators {
       onProgress?.call(
           '正在合并规则（第 ${i + 1}/${batches.length} 批）', i + 1, batches.length);
       final merged = await mergeBatch(batchRules);
-      debugPrint('[learn] 批次 ${i + 1}/${batches.length}：合并后新增 '
+      AppLog.log('learn', '批次 ${i + 1}/${batches.length}：合并后新增 '
           '${merged.added.length} 条、更新 ${merged.updatedRuleIds.length} 条');
       final touchedIds = [
         ...merged.added.map((r) => r.id),
@@ -326,7 +326,7 @@ class RuleGenerators {
     try {
       return _parseDecodedRuleItems(raw);
     } on FormatException catch (e) {
-      debugPrint('[learn] 规则解析失败：$e；模型输出片段：${_snippet(raw)}');
+      AppLog.log('learn', '规则解析失败：$e；模型输出片段：${_snippet(raw)}');
       rethrow;
     }
   }

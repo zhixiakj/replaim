@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:enough_mail/enough_mail.dart' as mail;
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/app_config.dart';
@@ -26,6 +25,7 @@ import '../services/rule_store.dart';
 import '../services/secret_storage.dart';
 import '../services/space_store.dart';
 import '../services/stores.dart';
+import '../services/app_log.dart';
 
 /// ------------------------------------------------------------------
 /// 敏感信息（启动时一次读入内存，写操作穿透 flutter_secure_storage）
@@ -81,7 +81,7 @@ class SecretsController extends Notifier<SecretsState> {
           mailPasswords: mail, mailOauth: oauth, llmApiKeys: llm, loaded: true));
     } catch (e, s) {
       // 钥匙串读取失败：按空表降级并置 loaded，避免调用方永久等待。
-      debugPrint('[secrets] _bootstrap 读取钥匙串失败（按空密码处理）：$e\n$s');
+      AppLog.log('secrets', '_bootstrap 读取钥匙串失败（按空密码处理）：$e\n$s');
       _set(const SecretsState(loaded: true));
     } finally {
       ready.complete();
@@ -388,14 +388,35 @@ final currentSpaceProvider = Provider<CurrentSpaceState>((ref) {
 
 /// 当前空间可用的 LLM 客户端（未分配 / 未配置时为 null）。
 final llmClientProvider = Provider<LlmClient?>((ref) {
-  final cur = ref.watch(currentSpaceProvider);
-  if (!cur.loaded) return null;
-  final space = cur.space;
+  // 直接 watch spacesProvider / spaceSelectionProvider 而非 currentSpaceProvider：
+  // CurrentSpaceState 按空间 ID 判等，空间内就地分配/解绑大模型时它不通知下游，
+  // 会让本 provider 缓存过期（分配后仍 null / 解绑后仍返回旧客户端）。
+  // SpacesState 无自定义 ==，每次空间保存都会触发本 provider 重建。
+  final spaces = ref.watch(spacesProvider);
+  final id = ref.watch(spaceSelectionProvider);
+  if (!spaces.loaded) return null;
+  final space = spaces.byId(id);
   if (space == null || space.llmProfileId == null) return null;
   final profile = ref.watch(llmProfilesProvider).byId(space.llmProfileId);
   if (profile == null || !profile.config.isConfigured) return null;
   final apiKey = ref.watch(secretsProvider).llmApiKeys[profile.id];
   return LlmClient(config: profile.config, apiKey: apiKey);
+});
+
+/// llmClientProvider 为 null 时的具体原因，供错误提示区分场景。
+/// watch 与 llmClientProvider 相同的源，点击时两者读到的是同一份状态。
+final llmUnavailableReasonProvider = Provider<String>((ref) {
+  final spaces = ref.watch(spacesProvider);
+  final profiles = ref.watch(llmProfilesProvider);
+  final hasConfigured = profiles.profiles.any((p) => p.config.isConfigured);
+  if (!hasConfigured) return '请先在设置中配置大模型，并在空间中分配';
+  final space = spaces.byId(ref.watch(spaceSelectionProvider));
+  if (space == null || space.llmProfileId == null) {
+    return '设置中已配置大模型，请在「空间」页为当前空间分配大模型';
+  }
+  final profile = profiles.byId(space.llmProfileId);
+  if (profile == null) return '当前空间分配的大模型已被删除，请在「空间」页重新分配';
+  return '当前空间分配的大模型配置不完整（缺接口地址或模型名），请在「设置」页完善';
 });
 
 /// ------------------------------------------------------------------
@@ -545,7 +566,7 @@ class LearnController extends Notifier<LearnRunState> {
       _set(LearnRunState(
           consumedCount: state.consumedCount,
           lastRunAt: state.lastRunAt,
-          error: '请先在设置中配置大模型，并在空间中分配'));
+          error: ref.read(llmUnavailableReasonProvider)));
       return;
     }
     final space = ref.read(currentSpaceProvider).space;
@@ -832,7 +853,7 @@ class KbController extends Notifier<KbState> {
   Future<void> generateRules() async {
     final llm = ref.read(llmClientProvider);
     if (llm == null) {
-      state = _copy(error: '请先在设置中配置大模型，并在空间中分配');
+      state = _copy(error: ref.read(llmUnavailableReasonProvider));
       return;
     }
     await _service.scanChanges();
@@ -891,6 +912,7 @@ class InboxState {
     this.messages = const [],
     this.conversations = const [],
     this.loading = false,
+    this.syncingLabel,
     this.error,
     this.selectedKey,
     this.selectedMessage,
@@ -904,6 +926,11 @@ class InboxState {
   final List<Conversation> conversations;
 
   final bool loading;
+
+  /// loading 期间正在同步的账号 × 文件夹（界面进度行；卡住时不用控制台
+  /// 就能看到停在哪一步）。
+  final String? syncingLabel;
+
   final String? error;
 
   /// 选中会话的规范键（参与人集合键）。
@@ -970,105 +997,123 @@ class InboxController extends Notifier<InboxState> {
     }
     // 冷启动竞态防护：等钥匙串凭证读入内存，再判断配置完整性。
     await ref.read(secretsProvider.notifier).ready;
-    _setDerived(state.messages, loading: true, refreshed: true);
+    _setDerived(state.messages,
+        loading: true, refreshed: true, syncingLabel: '准备同步…');
     final addresses = space.accountAddresses;
     final store = InboxCacheStore(spaceId: space.id);
     final all = <EmailSummary>[];
     final errors = <String>[];
-    for (final account in receivers) {
-      final mail =
-          ref.read(secretsProvider.notifier).buildMailService(account);
-      if (!mail.isReceiveReady) {
-        final reason = !account.isReceiveConfigured
-            ? '缺 IMAP 服务器配置'
-            : (account.authType == kAuthTypeOauth
-                ? '尚未完成 Microsoft 授权（在账号设置里重新登录）'
-                : '缺密码（钥匙串未返回该账号的授权码）');
-        errors.add('${account.email}：配置不完整（$reason）');
-        continue;
-      }
-      InboxCacheEntry? cached;
-      try {
-        cached = await store.load(account.id);
-      } catch (e) {
-        debugPrint('[inbox] 读缓存失败 ${account.email}：$e');
-      }
-      final forceFull = fullResync ||
-          (cached != null &&
-              DateTime.now().difference(cached.fetchedAt).inHours >= 24);
-      final accountMessages = <EmailSummary>[];
-      var inboxCursor = forceFull ? null : cached?.inboxCursor;
-      var sentCursor = forceFull ? null : cached?.sentCursor;
-      for (final role in const ['INBOX', 'Sent']) {
-        final isSent = role != 'INBOX';
-        final cursor = isSent ? sentCursor : inboxCursor;
-        // 缓存按 folder 拆给对应文件夹（旧缓存只有 INBOX，Sent 首次走全量）。
-        final cachedFolderMessages =
-            (cached?.messages ?? const <EmailSummary>[])
-                .where((m) =>
-                    isSent ? m.folder != 'INBOX' : m.folder == 'INBOX')
-                .toList();
+    final sw = Stopwatch()..start();
+    try {
+      for (final account in receivers) {
+        AppLog.log('inbox', '开始同步账号 ${account.email}…');
+        final mail =
+            ref.read(secretsProvider.notifier).buildMailService(account);
+        if (!mail.isReceiveReady) {
+          final reason = !account.isReceiveConfigured
+              ? '缺 IMAP 服务器配置'
+              : (account.authType == kAuthTypeOauth
+                  ? '尚未完成 Microsoft 授权（在账号设置里重新登录）'
+                  : '缺密码（钥匙串未返回该账号的授权码）');
+          errors.add('${account.email}：配置不完整（$reason）');
+          continue;
+        }
+        InboxCacheEntry? cached;
         try {
-          final result = await mail.fetchIncremental(
-            folder: role,
-            limit: 50,
-            accountId: account.id,
-            spaceAddresses: addresses,
-            cachedUidValidity: forceFull ? null : cursor?.uidValidity,
-            cachedLastUid: forceFull ? null : cursor?.lastUid,
-            cachedMessages: forceFull ? const [] : cachedFolderMessages,
-          );
-          if (result.fullResync) {
-            debugPrint('[inbox] ${account.email} $role'
-                ' 全量同步 ${result.messages.length} 封');
-          }
-          accountMessages.addAll(result.messages);
-          final newCursor = FolderCursor(
-              uidValidity: result.uidValidity, lastUid: result.lastUid);
-          if (isSent) {
-            sentCursor = newCursor;
-          } else {
-            inboxCursor = newCursor;
-          }
-        } on FolderNotFoundException {
-          // 服务器没有已发送文件夹（少见）：提示并跳过，不影响收件。
-          if (isSent) {
-            errors.add('${account.email}：未找到已发送文件夹，已跳过');
-            accountMessages.addAll(cachedFolderMessages);
-          }
+          cached = await store.load(account.id);
         } catch (e) {
-          // 同步失败但缓存有数据：保留缓存展示，离线不清空列表。
-          if (cachedFolderMessages.isNotEmpty) {
-            accountMessages.addAll(cachedFolderMessages);
-            errors.add('${account.email} $role：同步失败（展示缓存）：$e');
-          } else {
-            errors.add('${account.email} $role：$e');
+          AppLog.log('inbox', '读缓存失败 ${account.email}：$e');
+        }
+        final forceFull = fullResync ||
+            (cached != null &&
+                DateTime.now().difference(cached.fetchedAt).inHours >= 24);
+        final accountMessages = <EmailSummary>[];
+        var inboxCursor = forceFull ? null : cached?.inboxCursor;
+        var sentCursor = forceFull ? null : cached?.sentCursor;
+        for (final role in const ['INBOX', 'Sent']) {
+          final isSent = role != 'INBOX';
+          final cursor = isSent ? sentCursor : inboxCursor;
+          // 缓存按 folder 拆给对应文件夹（旧缓存只有 INBOX，Sent 首次走全量）。
+          final cachedFolderMessages =
+              (cached?.messages ?? const <EmailSummary>[])
+                  .where((m) =>
+                      isSent ? m.folder != 'INBOX' : m.folder == 'INBOX')
+                  .toList();
+          _setDerived(state.messages,
+              loading: true,
+              refreshed: true,
+              syncingLabel: '正在同步 ${account.email} $role…');
+          try {
+            final result = await mail.fetchIncremental(
+              folder: role,
+              limit: 50,
+              accountId: account.id,
+              spaceAddresses: addresses,
+              cachedUidValidity: forceFull ? null : cursor?.uidValidity,
+              cachedLastUid: forceFull ? null : cursor?.lastUid,
+              cachedMessages: forceFull ? const [] : cachedFolderMessages,
+            );
+            if (result.fullResync) {
+              AppLog.log('inbox', '${account.email} $role'
+                  ' 全量同步 ${result.messages.length} 封');
+            }
+            accountMessages.addAll(result.messages);
+            final newCursor = FolderCursor(
+                uidValidity: result.uidValidity, lastUid: result.lastUid);
+            if (isSent) {
+              sentCursor = newCursor;
+            } else {
+              inboxCursor = newCursor;
+            }
+          } on FolderNotFoundException {
+            // 服务器没有已发送文件夹（少见）：提示并跳过，不影响收件。
+            if (isSent) {
+              errors.add('${account.email}：未找到已发送文件夹，已跳过');
+              accountMessages.addAll(cachedFolderMessages);
+            }
+          } catch (e) {
+            AppLog.log('inbox', '同步失败 ${account.email} $role：$e');
+            // 同步失败但缓存有数据：保留缓存展示，离线不清空列表。
+            if (cachedFolderMessages.isNotEmpty) {
+              accountMessages.addAll(cachedFolderMessages);
+              errors.add('${account.email} $role：同步失败（展示缓存）：$e');
+            } else {
+              errors.add('${account.email} $role：$e');
+            }
           }
         }
+        all.addAll(accountMessages);
+        try {
+          await store.save(
+            account.id,
+            InboxCacheEntry(
+              messages: accountMessages,
+              inboxCursor: inboxCursor,
+              sentCursor: sentCursor,
+            ),
+          );
+        } catch (e) {
+          AppLog.log('inbox', '写缓存失败 ${account.email}：$e');
+        }
       }
-      all.addAll(accountMessages);
+      all.sort((a, b) => (b.parsedDate ?? DateTime(2000))
+          .compareTo(a.parsedDate ?? DateTime(2000)));
       try {
-        await store.save(
-          account.id,
-          InboxCacheEntry(
-            messages: accountMessages,
-            inboxCursor: inboxCursor,
-            sentCursor: sentCursor,
-          ),
-        );
+        await store.prune(receivers.map((a) => a.id).toSet());
       } catch (e) {
-        debugPrint('[inbox] 写缓存失败 ${account.email}：$e');
+        AppLog.log('inbox', '清理失效缓存失败：$e');
       }
-    }
-    all.sort((a, b) => (b.parsedDate ?? DateTime(2000))
-        .compareTo(a.parsedDate ?? DateTime(2000)));
-    try {
-      await store.prune(receivers.map((a) => a.id).toSet());
     } catch (e) {
-      debugPrint('[inbox] 清理失效缓存失败：$e');
+      // 兜底：循环内各步已有局部捕获，这里接住漏网异常
+      // （如底层库抛出的意外类型），保证 loading 一定能清除。
+      errors.add('刷新中断：$e');
+    } finally {
+      AppLog.log('inbox', '刷新完成：${all.length} 封'
+          '${errors.isEmpty ? '' : '，${errors.length} 条错误'}'
+          '（${sw.elapsedMilliseconds}ms）');
+      _setDerived(all,
+          error: errors.isEmpty ? null : errors.join('；'), refreshed: true);
     }
-    _setDerived(all,
-        error: errors.isEmpty ? null : errors.join('；'), refreshed: true);
   }
 
   /// 选中会话；默认选最新一封对方来件，便于直接生成草稿。
@@ -1131,7 +1176,7 @@ class InboxController extends Notifier<InboxState> {
               ));
         }
       } catch (e) {
-        debugPrint('[inbox] 详情回写缓存失败：$e');
+        AppLog.log('inbox', '详情回写缓存失败：$e');
       }
     } catch (_) {
       // 离线 / 服务器失败 / 空间已切换：弹窗继续展示缓存信息，不重试。
@@ -1149,6 +1194,7 @@ class InboxController extends Notifier<InboxState> {
   void _setDerived(
     List<EmailSummary> messages, {
     bool loading = false,
+    String? syncingLabel,
     String? error,
     bool? refreshed,
     String? selectedKey,
@@ -1188,13 +1234,16 @@ class InboxController extends Notifier<InboxState> {
         messages: messages,
         conversations: conversations,
         loading: loading,
+        syncingLabel: syncingLabel,
         error: error,
         selectedKey: selectedKey,
         selectedMessage: selectedKey == null ? null : selectedMessage,
         refreshed: refreshed ?? state.refreshed,
       );
-    } catch (_) {
-      // provider 已随空间切换销毁，丢弃本次更新。
+    } catch (e) {
+      // provider 已随空间切换销毁时 ref.read 会抛错，丢弃本次更新；
+      // 其它异常也一并吞掉但留日志，避免「状态更新失败 → 永远 loading」无声复现。
+      AppLog.log('inbox', '状态更新被丢弃：$e');
     }
   }
 }
@@ -1249,7 +1298,7 @@ class DraftsController extends Notifier<DraftsState> {
   Future<String?> generateFor(EmailSummary email) async {
     final llm = ref.read(llmClientProvider);
     if (llm == null) {
-      state = _copy(error: '请先在设置中配置大模型，并在空间中分配');
+      state = _copy(error: ref.read(llmUnavailableReasonProvider));
       return null;
     }
     final space = ref.read(currentSpaceProvider).space;
@@ -1467,7 +1516,7 @@ class DraftsController extends Notifier<DraftsState> {
       DraftRecord record, String instruction) async {
     final llm = ref.read(llmClientProvider);
     if (llm == null) {
-      throw StateError('请先在设置中配置大模型，并在空间中分配');
+      throw StateError(ref.read(llmUnavailableReasonProvider));
     }
     final space = ref.read(currentSpaceProvider).space;
     final historyText = record.chatHistory

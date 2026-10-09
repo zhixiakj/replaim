@@ -81,6 +81,15 @@ class _InboxPageState extends ConsumerState<InboxPage> {
                   ],
                 ),
               ),
+              if (state.loading && state.syncingLabel != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+                  child: Text(
+                    state.syncingLabel!,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
+                ),
               if (state.error != null)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
