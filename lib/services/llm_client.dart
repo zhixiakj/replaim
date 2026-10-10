@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 
+import '../l10n/messages.dart';
 import '../models/app_config.dart';
 import 'json_extract.dart';
 
@@ -78,8 +79,10 @@ class LlmClient {
     if (content == null || content.trim().isEmpty) {
       final reason = _finishReason(data);
       throw LlmException(switch (reason) {
-        'length' => '输出被 max_tokens 截断（推理型模型的思考也计入预算），请调大 max tokens',
-        _ => '模型未返回任何内容${reason == null ? '' : '（finish_reason=$reason）'}',
+        'length' => const L10nMsg('llmErrTruncated'),
+        _ => reason == null
+            ? const L10nMsg('llmErrEmptyPlain')
+            : L10nMsg('llmErrEmptyReason', [reason]),
       });
     }
     return LlmResult(
@@ -116,15 +119,15 @@ class LlmClient {
         ];
       }
     }
-    throw LlmException('模型多次未能输出合法 JSON：$lastError');
+    throw LlmException(L10nMsg('llmErrNotJson', [errToMsg(lastError!)]));
   }
 
   /// 连接测试：发一条极小的请求验证 base URL / key / 模型名。
   /// 返回错误信息（null = 成功）。404 时自动尝试补 /v1 重试一次。
-  Future<String?> testConnection() async {
-    if (!isConfigured) return '请先填写 Base URL 和模型名';
-    String? error = await _testOnce(endpoint);
-    if (error != null && error.contains('404')) {
+  Future<L10nMsg?> testConnection() async {
+    if (!isConfigured) return const L10nMsg('llmErrNotConfigured');
+    var error = await _testOnce(endpoint);
+    if (error != null && error.is404) {
       final fallback = _endpointWithV1();
       if (fallback != null) {
         error = await _testOnce(fallback);
@@ -133,7 +136,7 @@ class LlmClient {
         }
       }
     }
-    return error;
+    return error?.msg;
   }
 
   /// testConnection 探测出的可用 endpoint（若自动补了 /v1）。
@@ -148,7 +151,9 @@ class LlmClient {
     return '$base/v1/chat/completions';
   }
 
-  Future<String?> _testOnce(String url) async {
+  /// 单次探测结果：错误消息 + 是否 404（用于判断要不要补 /v1 重试，
+  /// 不再靠在错误文案里搜 "404" 判断）。
+  Future<({L10nMsg msg, bool is404})?> _testOnce(String url) async {
     try {
       final response = await _dio.post<dynamic>(
         url,
@@ -166,11 +171,19 @@ class LlmClient {
         probedEndpoint = url;
         return null;
       }
-      return 'HTTP $status：${_errorDetail(response.data)}';
+      return (
+        msg: L10nMsg('llmErrHttp', ['$status', _errorDetail(response.data)]),
+        is404: status == 404
+      );
     } on DioException catch (e) {
-      return e.message ?? '网络错误';
+      return (
+        msg: e.message == null
+            ? const L10nMsg('llmErrNetwork')
+            : L10nMsg('commonRawError', [e.message!]),
+        is404: false
+      );
     } catch (e) {
-      return e.toString();
+      return (msg: L10nMsg('commonRawError', [e.toString()]), is404: false);
     }
   }
 
@@ -183,16 +196,19 @@ class LlmClient {
       );
       final status = response.statusCode ?? 0;
       if (status < 200 || status >= 300) {
-        throw LlmException('HTTP $status：${_errorDetail(response.data)}');
+        throw LlmException(
+            L10nMsg('llmErrHttp', ['$status', _errorDetail(response.data)]));
       }
       return Map<String, dynamic>.from(response.data as Map);
     } on DioException catch (e) {
       if (e.type == DioExceptionType.connectionTimeout ||
           e.type == DioExceptionType.receiveTimeout ||
           e.type == DioExceptionType.sendTimeout) {
-        throw LlmException('请求超时（${config.timeoutSeconds}s），可在设置中调大超时');
+        throw LlmException(L10nMsg('llmErrTimeout', [config.timeoutSeconds]));
       }
-      throw LlmException(e.message ?? '网络错误');
+      throw LlmException(e.message == null
+          ? const L10nMsg('llmErrNetwork')
+          : L10nMsg('commonRawError', [e.message!]));
     }
   }
 
@@ -238,15 +254,12 @@ class LlmClient {
       }
       if (data['message'] != null) return data['message'].toString();
     }
-    return data?.toString() ?? '未知错误';
+    return data?.toString() ?? '';
   }
 }
 
-class LlmException implements Exception {
-  LlmException(this.message);
-
-  final String message;
-
-  @override
-  String toString() => message;
+/// LLM 调用失败。携带结构化消息（[L10nMsg]），UI 层经
+/// errToMsg + resolveL10nMsg 渲染。
+class LlmException extends LocalizedError {
+  const LlmException(super.msg);
 }

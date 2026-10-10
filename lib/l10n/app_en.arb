@@ -1,0 +1,706 @@
+{
+  "@@locale": "en",
+  "appTitle": "Replaim Email Copilot",
+  "@appTitle": { "description": "Window / task-switcher app title" },
+
+  "navInbox": "Inbox",
+  "navDrafts": "Drafts",
+  "navRules": "Rules",
+  "navKb": "Knowledge",
+  "navLearn": "Learning",
+  "navSpaces": "Spaces",
+  "navSettings": "Settings",
+
+  "switchSpaceTooltip": "Switch space",
+  "accountsCount": "{count, plural, =1{1 account} other{{count} accounts}}",
+  "@accountsCount": { "placeholders": { "count": { "type": "num" } } },
+  "noSpaceSelected": "No space selected",
+  "loading": "Loading…",
+  "spaceReceiveSend": "{receive} in / {send} out",
+  "@spaceReceiveSend": {
+    "placeholders": {
+      "receive": { "type": "num" },
+      "send": { "type": "num" }
+    }
+  },
+  "newSpaceTooltip": "New space",
+  "newSpaceTitle": "New space",
+  "spaceNameLabel": "Space name (e.g. store / brand)",
+
+  "commonCancel": "Cancel",
+  "commonCreate": "Create",
+  "commonEdit": "Edit",
+  "commonDelete": "Delete",
+  "commonSave": "Save",
+  "commonJoinSeparator": ", ",
+  "commonDone": "Done",
+  "commonAdd": "Add",
+  "commonClose": "Close",
+  "commonSend": "Send",
+  "commonSending": "Sending…",
+  "commonEmptyValue": "(empty)",
+  "commonTesting": "Testing…",
+  "commonTestConnection": "Test connection",
+
+  "settingsSummary": "{count, plural, =1{1 rule enabled in the current space} other{{count} rules enabled in the current space}} · Data folder: {path}",
+  "@settingsSummary": {
+    "placeholders": {
+      "count": { "type": "num" },
+      "path": { "type": "String" }
+    }
+  },
+  "settingsGeneralTitle": "General",
+  "settingsLanguageLabel": "Language",
+  "settingsLanguageSystem": "Follow system",
+  "settingsLlmSectionTitle": "LLM (global, OpenAI-compatible APIs)",
+  "settingsLlmSectionSubtitle": "{count, plural, =0{No space has a model assigned yet} =1{1 space has a model assigned} other{{count} spaces have a model assigned}}. Configure multiple model endpoints here, then assign them to spaces on the Spaces page.",
+  "@settingsLlmSectionSubtitle": {
+    "placeholders": { "count": { "type": "num" } }
+  },
+  "settingsLlmEmpty": "No model configured yet. Click the button below to add one.",
+  "llmProfileTitle": "{name} ({model})",
+  "@llmProfileTitle": {
+    "placeholders": {
+      "name": { "type": "String" },
+      "model": { "type": "String" }
+    }
+  },
+  "settingsAddLlm": "Add LLM",
+  "settingsAddLlmTitle": "Add LLM",
+  "settingsEditLlmTitle": "Edit LLM",
+  "settingsLlmFieldName": "Name (e.g. DeepSeek, company GPT)",
+  "settingsLlmFieldBaseUrl": "API base URL (usually ends with /v1), e.g. https://api.deepseek.com/v1",
+  "settingsLlmFieldModel": "Model name, e.g. deepseek-chat",
+  "settingsLlmFieldApiKey": "API key (leave blank when editing to keep)",
+  "settingsLlmFieldTemperature": "Temperature",
+  "settingsLlmFieldMaxTokens": "Max tokens",
+  "settingsLlmFieldTimeout": "Timeout (s)",
+  "settingsLlmTestOk": "Connection OK ({endpoint})",
+  "@settingsLlmTestOk": {
+    "placeholders": { "endpoint": { "type": "String" } }
+  },
+  "settingsLlmUnnamed": "Unnamed model",
+  "settingsLlmSaved": "LLM configuration saved",
+  "settingsLlmDeleteTitle": "Delete model \"{name}\"",
+  "@settingsLlmDeleteTitle": {
+    "placeholders": { "name": { "type": "String" } }
+  },
+  "settingsLlmDeleteUnused": "This model is not used by any space.",
+  "settingsLlmDeleteInUse": "These spaces are using this model and will become unassigned after deletion:\n{spaces}",
+  "@settingsLlmDeleteInUse": {
+    "placeholders": { "spaces": { "type": "String" } }
+  },
+  "settingsPromptSectionTitle": "Custom prompt rules",
+  "settingsPromptSectionSubtitle": "Turn your reply requirements into rules (saved to the current space, used for drafting together with history and knowledge-base rules)",
+  "settingsPromptHint": "e.g. Apologize first, then offer a solution for all refund emails; sign off with \"Best regards, Amy\"",
+  "settingsPromptSplitButton": "Split into rules with LLM (recommended)",
+  "settingsPromptDirectButton": "Add as a single rule",
+  "settingsPromptEmpty": "No custom prompt rules yet",
+  "settingsPromptSplitting": "Splitting into rules…",
+  "settingsPromptConfirmTitle": "Review generated rules",
+  "settingsPromptAddSelected": "Add selected",
+  "settingsPromptAddedRules": "{count, plural, =1{Added 1 rule} other{Added {count} rules}}",
+  "@settingsPromptAddedRules": {
+    "placeholders": { "count": { "type": "num" } }
+  },
+  "settingsPromptSplitFailed": "Split failed: {error}",
+  "@settingsPromptSplitFailed": {
+    "placeholders": { "error": { "type": "String" } }
+  },
+  "settingsPromptAddedOne": "Rule added",
+
+  "ruleSourceEmailHistory": "History emails",
+  "ruleSourceKnowledgeBase": "Knowledge base",
+  "ruleSourceUserPrompt": "Custom prompt",
+  "ruleSourceDraftFeedback": "Draft edit feedback",
+  "ruleSourceManual": "Manual",
+  "ruleCategoryTone": "Tone & style",
+  "ruleCategoryPolicy": "After-sales policy",
+  "ruleCategoryFormat": "Format & structure",
+  "ruleCategoryProduct": "Product info",
+  "ruleCategoryCompliance": "Platform compliance",
+  "ruleCategoryOther": "Other",
+
+  "spacesTitle": "Spaces",
+  "spacesEmptyIntro": "A space is an independent business context (e.g. a store / brand):\n· One shared set of reply rules and knowledge base per space\n· Multiple email accounts, each with its own receive (IMAP) and send (SMTP) toggles\n· Forwarded mail (e.g. customer writes support@, forwarded to a configured account) is detected: the original recipient is CC'd on replies",
+  "spacesCreateFirst": "Create your first space",
+  "spacesCount": "{count, plural, =1{1 space} other{{count} spaces}}",
+  "@spacesCount": { "placeholders": { "count": { "type": "num" } } },
+  "spacesCurrentBadge": "Current",
+  "spacesAccountSummary": "{accounts, plural, =1{1 account} other{{accounts} accounts}} · {receive} in / {send} out",
+  "@spacesAccountSummary": {
+    "placeholders": {
+      "accounts": { "type": "num" },
+      "receive": { "type": "num" },
+      "send": { "type": "num" }
+    }
+  },
+  "spacesDeleteTooltip": "Delete space",
+  "spacesDeleteTitle": "Delete space \"{name}\"",
+  "@spacesDeleteTitle": { "placeholders": { "name": { "type": "String" } } },
+  "spacesDeleteContent": "This will delete the space's rules, knowledge base, learning state and draft records, plus the stored passwords of all its accounts.\nThis cannot be undone.",
+  "spacesDetailTitle": "Space: {name}",
+  "@spacesDetailTitle": { "placeholders": { "name": { "type": "String" } } },
+  "spacesSetCurrent": "Set as current",
+  "spacesBasicInfoSection": "Basics",
+  "spacesFieldName": "Space name",
+  "spacesAssignLlmLabel": "Assigned LLM (manage models in Settings)",
+  "spacesLlmUnassigned": "Unassigned",
+  "spacesDefaultSendLabel": "Default send account (fallback when a receive account can't send)",
+  "spacesDefaultSendAuto": "Auto (any account with sending enabled)",
+  "spacesOutputLanguageLabel": "Draft output language (default English)",
+  "spacesLearnPrefsSection": "Learning preferences (per space)",
+  "spacesLearnMonthsLabel": "Learning window (recent N months)",
+  "spacesLearnFoldersHint": "History learn folders are set per email account (folder names vary by provider: Gmail uses [Gmail]/Sent Mail ([Gmail]/已发送邮件 on Chinese-language accounts), QQ/163 use Sent Messages, Outlook uses Sent). Edit each account under \"Email accounts\" below; common names match automatically, and when none match, learning falls back to the server's Sent flag.",
+  "spacesAccountsSection": "{count, plural, =1{Email account (1)} other{Email accounts ({count})}}",
+  "@spacesAccountsSection": { "placeholders": { "count": { "type": "num" } } },
+  "spacesAccountsSubtitle": "Each account can separately enable receive (IMAP) and send (SMTP); replies are sent from the receiving account by default",
+  "spacesNoAccounts": "No accounts yet. Click the button below to add one.",
+  "spacesAddAccount": "Add email account",
+  "spacesAutoSaved": "Changes save automatically",
+  "spacesDeleteAccountTitle": "Delete account {email}",
+  "@spacesDeleteAccountTitle": { "placeholders": { "email": { "type": "String" } } },
+  "spacesDeleteAccountContent": "This removes the account's configuration and stored password. Space data is unaffected.",
+  "accountDisabledBadge": "Disabled",
+  "accountReceiveBadge": "Receive",
+  "accountNoReceiveBadge": "No receive",
+  "accountSendBadge": "Send",
+  "accountNoSendBadge": "No send",
+  "accountDefaultSendBadge": "Default send",
+  "accountLearnFoldersBadge": "Learn: {folders}",
+  "@accountLearnFoldersBadge": { "placeholders": { "folders": { "type": "String" } } },
+  "spacesAddAccountTitle": "Add email account (space: {space})",
+  "@spacesAddAccountTitle": { "placeholders": { "space": { "type": "String" } } },
+  "spacesEditAccountTitle": "Edit account {email}",
+  "@spacesEditAccountTitle": { "placeholders": { "email": { "type": "String" } } },
+  "spacesFieldEmail": "Email address (also used as login username)",
+  "spacesFieldEmailHelper": "Common providers (Gmail / QQ / 163 / Outlook…) auto-fill the server settings and learn folder below once the address is entered",
+  "spacesFieldDisplayName": "From display name (optional)",
+  "spacesEnableAccount": "Enable this account",
+  "spacesEnableAccountSubtitle": "When disabled it stays out of receiving, sending and learning; the configuration is kept and can be re-enabled anytime",
+  "spacesOauthToggle": "OAuth2 sign-in (required for Outlook: Microsoft has disabled password login)",
+  "spacesFieldPassword": "Password / app password",
+  "spacesTabReceive": "Receive (IMAP)",
+  "spacesTabSend": "Send (SMTP)",
+  "spacesSaveAccount": "Save account",
+  "spacesReceiveToggle": "Receive (IMAP: fetches the inbox, used for learning)",
+  "spacesFieldImapHost": "IMAP server, e.g. imap.qq.com",
+  "spacesFieldPort": "Port",
+  "spacesImapSslToggle": "Use SSL for IMAP (usually on for port 993)",
+  "spacesFieldLearnFolders": "History learn folders (comma-separated, default Sent)",
+  "spacesLearnFoldersHelper": "Folder names vary by provider: Gmail uses [Gmail]/Sent Mail ([Gmail]/已发送邮件 on Chinese-language accounts), QQ/163 use Sent Messages, Outlook uses Sent. Common names match automatically; if unsure, use the button below to pick from the server",
+  "spacesLoadFoldersButton": "Load folder list from server",
+  "spacesSendToggle": "Send (SMTP: can be used to send replies)",
+  "spacesFieldSmtpHost": "SMTP server, e.g. smtp.qq.com (leave empty for receive-only)",
+  "spacesSmtpSecureToggle": "SMTP encryption (465=SSL / 587=STARTTLS)",
+  "spacesForcedOffNoOauth": "Microsoft authorization not completed",
+  "spacesForcedOffNoPassword": "Password / app password not filled in",
+  "spacesForcedOffTestFailed": "Last \"Test connection\" failed",
+  "spacesErrEmailRequired": "Please fill in the email address",
+  "spacesSavedDisabled": "{email}: {reason}. Saved as disabled — complete and verify, then enable it in the account list.",
+  "@spacesSavedDisabled": {
+    "placeholders": {
+      "email": { "type": "String" },
+      "reason": { "type": "String" }
+    }
+  },
+  "spacesOauthNeedClientId": "Fill in the Azure app client ID first (the Application (client) ID on the Azure app's Overview page)",
+  "spacesOauthSuccess": "✓ Microsoft authorization succeeded (token valid until {expiry}, renews automatically)",
+  "@spacesOauthSuccess": { "placeholders": { "expiry": { "type": "String" } } },
+  "spacesOauthFailed": "Authorization failed: {error}",
+  "@spacesOauthFailed": { "placeholders": { "error": { "type": "String" } } },
+  "spacesFoldersMore": " … {count} in total",
+  "@spacesFoldersMore": { "placeholders": { "count": { "type": "num" } } },
+  "spacesFoldersMissing": "{email}: learn folder(s) \"{folders}\" not found on the server (available: {existing}). Edit the account and use \"Load folder list from server\" to pick.",
+  "@spacesFoldersMissing": {
+    "placeholders": {
+      "email": { "type": "String" },
+      "folders": { "type": "String" },
+      "existing": { "type": "String" }
+    }
+  },
+  "spacesTestOkFoldersMatched": "Connection OK; learn folder(s) \"{folders}\" matched ✓",
+  "@spacesTestOkFoldersMatched": { "placeholders": { "folders": { "type": "String" } } },
+  "spacesTestFoldersMissing": "Connection OK; ⚠ learn folder(s) \"{folders}\" not found on the server (use the button below to pick from the server)",
+  "@spacesTestFoldersMissing": { "placeholders": { "folders": { "type": "String" } } },
+  "spacesTestOkImap": "Connection OK (IMAP login verified)",
+  "spacesPickFoldersNeedOauth": "Fill in the email address and complete Microsoft authorization first",
+  "spacesPickFoldersNeedCreds": "Fill in the email address, IMAP server and password first",
+  "spacesPickFoldersTitle": "Choose history learn folders",
+  "spacesServerSentBadge": "Server Sent",
+  "spacesLoadFoldersFailed": "Failed to load folders: {error}",
+  "@spacesLoadFoldersFailed": { "placeholders": { "error": { "type": "String" } } },
+  "spacesPwdHelperNew": "QQ, 163 and similar providers require an app password generated in the provider's console; it is encrypted and stored in the system keychain after saving",
+  "spacesPwdHelperSaved": "App password saved (the dots are just a placeholder); type a new one to replace it",
+  "spacesPwdHelperNone": "No password saved yet",
+  "spacesOauthClientIdLabel": "Azure app client ID",
+  "spacesOauthClientIdHelper": "Register a \"Mobile and desktop application\" in the Azure portal (redirect URI http://localhost, account type including personal Microsoft accounts); multiple Outlook accounts can share one ID",
+  "spacesOauthWaiting": "Waiting for the browser to finish authorization… (up to 5 minutes)",
+  "spacesOauthRelogin": "Sign in to Microsoft account again",
+  "spacesOauthLogin": "Sign in to Microsoft account",
+  "spacesOauthNotYetHint": "Not authorized yet: you can save first (the account stays disabled) and finish sign-in later to enable it (Outlook also requires enabling IMAP in its web settings)",
+
+  "rulesEnabledSummary": "{enabled} of {total} enabled",
+  "@rulesEnabledSummary": {
+    "placeholders": {
+      "enabled": { "type": "num" },
+      "total": { "type": "num" }
+    }
+  },
+  "rulesAddManual": "Add manually",
+  "rulesSearchHint": "Search rule content",
+  "rulesFilterAllSources": "All sources",
+  "rulesFilterEnabledOnly": "Enabled only",
+  "rulesEmpty": "The rule library is empty: learn from history in \"Learning\",\nimport documents into \"Knowledge\", or add a custom prompt in \"Settings\"",
+  "rulesAddManualTitle": "Add a rule manually",
+  "rulesFieldContent": "Rule content",
+  "rulesFieldCategory": "Category",
+  "rulesSuperseded": "superseded",
+  "rulesStatsTooltip": "Used {used} times · sent unchanged {kept} times · edited {edited} times",
+  "@rulesStatsTooltip": {
+    "placeholders": {
+      "used": { "type": "num" },
+      "kept": { "type": "num" },
+      "edited": { "type": "num" }
+    }
+  },
+  "rulesUsedTimes": "{count}×",
+  "@rulesUsedTimes": { "placeholders": { "count": { "type": "num" } } },
+  "rulesDetailTitle": "Rule detail",
+  "rulesKvCategory": "Category",
+  "rulesKvStatus": "Status",
+  "rulesStatusEnabled": "Enabled",
+  "rulesStatusDisabled": "Disabled",
+  "rulesStatusSuperseded": "Superseded",
+  "rulesKvVersion": "Version",
+  "rulesKvStats": "Usage",
+  "rulesStatsDetail": "Used {used} · sent unchanged {kept} · edited {edited}",
+  "@rulesStatsDetail": {
+    "placeholders": {
+      "used": { "type": "num" },
+      "kept": { "type": "num" },
+      "edited": { "type": "num" }
+    }
+  },
+  "rulesSourceSection": "Source (where this rule came from)",
+  "rulesKvType": "Type",
+  "rulesKvGeneratedBy": "Generated by",
+  "rulesKvCreatedAt": "Created",
+  "rulesHistorySection": "Version history",
+  "rulesChangeReason": "Change reason: {reason}",
+  "@rulesChangeReason": { "placeholders": { "reason": { "type": "String" } } },
+  "rulesDeleteTitle": "Delete rule",
+  "rulesDeleteContent": "This cannot be undone (version history included). Delete?",
+  "rulesKvDateRange": "Email date range",
+  "rulesKvSourceMails": "Source emails",
+  "rulesSourceMailsDetail": "{count, plural, =1{1 email (Message-IDs are recorded in the learning state, no re-learning)} other{{count} emails (Message-IDs are recorded in the learning state, no re-learning)}}",
+  "@rulesSourceMailsDetail": { "placeholders": { "count": { "type": "num" } } },
+  "rulesKvDoc": "Document",
+  "rulesKvDocVersion": "Doc version",
+  "rulesKvUserPrompt": "User prompt",
+  "rulesKvSourceDraft": "Source draft",
+  "rulesKvChangeSummary": "Change summary",
+  "rulesKvReason": "Reason",
+  "rulesEditContentTitle": "Edit rule content",
+
+  "inboxRefreshTooltip": "Refresh",
+  "inboxRefreshIncremental": "Refresh (new mail only)",
+  "inboxRefreshFull": "Full refresh (rebuild cache)",
+  "inboxEmpty": "No emails yet. Configure an account in Spaces and refresh",
+  "inboxNoSelection": "Select a conversation to view the thread",
+  "inboxInternalConversation": "(internal to this space)",
+  "inboxNoBody": "(no body)",
+  "inboxForwardedTooltip": "Contains forwarded mail; the original recipient is not an account in this space",
+  "inboxRepliedBadge": "Replied",
+  "inboxMePrefix": "Me: {text}",
+  "@inboxMePrefix": { "placeholders": { "text": { "type": "String" } } },
+  "inboxMessagesCount": "{count, plural, =1{1 message (sent included)} other{{count} messages (sent included)}}",
+  "@inboxMessagesCount": { "placeholders": { "count": { "type": "num" } } },
+  "inboxDraftsCount": "{count, plural, =1{1 draft} other{{count} drafts}}",
+  "@inboxDraftsCount": { "placeholders": { "count": { "type": "num" } } },
+  "inboxNoIncoming": "No incoming mail in this conversation; can't generate a draft",
+  "inboxTapToSelect": "Click an incoming bubble to enable draft generation",
+  "inboxSelected": "Selected: {subject}",
+  "@inboxSelected": { "placeholders": { "subject": { "type": "String" } } },
+  "inboxGenerating": "Generating…",
+  "inboxGenerateDraft": "Generate draft from rules",
+  "inboxForwardedWarning": "Forward detected: the customer originally wrote to {recipients} (not an account in this space). Drafts will be sent via {account} with those addresses CC'd by default; adjust on the draft page.",
+  "@inboxForwardedWarning": {
+    "placeholders": {
+      "recipients": { "type": "String" },
+      "account": { "type": "String" }
+    }
+  },
+  "inboxChipDraft": "Draft",
+  "inboxChipSentManual": "Sent · marked manually",
+  "inboxChipSent": "Sent",
+  "inboxReplySubject": "Reply: {subject}",
+  "@inboxReplySubject": { "placeholders": { "subject": { "type": "String" } } },
+  "inboxDraftPendingNote": "{date} · unsent drafts are not counted for future generation or learning",
+  "@inboxDraftPendingNote": { "placeholders": { "date": { "type": "String" } } },
+  "inboxDraftCountedNote": "{date} · counted as a reference for future generation and learning",
+  "@inboxDraftCountedNote": { "placeholders": { "date": { "type": "String" } } },
+  "inboxMarkSent": "Mark sent",
+  "inboxSentFallback": "Sent",
+  "inboxSendFailed": "Send failed",
+  "inboxMarkedSentFallback": "Marked as sent",
+  "inboxEmailDetails": "Email details",
+  "inboxSentVia": "sent via {account}",
+  "@inboxSentVia": { "placeholders": { "account": { "type": "String" } } },
+  "inboxReceivedVia": "received at {account}",
+  "@inboxReceivedVia": { "placeholders": { "account": { "type": "String" } } },
+  "inboxAuthInfoMissing": "No sender authentication info found (the email may not include it, or the network is unavailable)",
+  "inboxAuthInfoLoading": "Fetching sender authentication info…",
+
+  "learnReset": "Reset learning history",
+  "learnResetTitle": "Reset learning history",
+  "learnResetContent": "This clears the \"consumed emails\" record; generated rules are kept. The next incremental learning run will re-read all history. Continue?",
+  "learnResetConfirm": "Reset",
+  "learnRunning": "Learning…",
+  "learnStart": "Start incremental learning",
+  "learnIntro": "Distills reply rules from each account's \"{folders}\" and the last {months} months of inbox history (folder names vary by provider; set per account under \"Spaces\" → email account). While learning, customer mails and your replies are paired by thread to learn \"what was asked → how it was answered\" (accounts are learned one by one). Learned emails are never reused; mails are processed oldest-first with newer mails winning conflicts, so old mails never overwrite rules distilled from newer ones.",
+  "@learnIntro": {
+    "placeholders": {
+      "folders": { "type": "String" },
+      "months": { "type": "num" }
+    }
+  },
+  "learnProcessing": "Processing…",
+  "learnFailedFoldersTitle": "Some learn folders failed to fetch",
+  "learnFailedFoldersHint": "On \"Spaces\" → email account → edit the account → history learn folders, use a folder name that actually exists on the server, or pick directly via \"Load folder list from server\"; common sent-folder names (Sent / Sent Messages / Sent Items / 已发送) match automatically, and when none match, learning falls back to the server's \\Sent flag.",
+  "learnStatusSection": "Learning status",
+  "learnConsumedCount": "{count, plural, =1{1 email consumed} other{{count} emails consumed}}",
+  "@learnConsumedCount": { "placeholders": { "count": { "type": "num" } } },
+  "learnLastRun": "Last learning run: {time}",
+  "@learnLastRun": { "placeholders": { "time": { "type": "String" } } },
+  "learnNever": "Never learned",
+  "learnNoRecords": "No learning history yet. Click \"Start incremental learning\" to distill rules from history.",
+  "learnRecentSection": "Recently consumed emails (up to 200 shown)",
+  "learnNoSubject": "(no subject)",
+  "learnGeneratedRules": "{count, plural, =1{1 rule produced} other{{count} rules produced}}",
+  "@learnGeneratedRules": { "placeholders": { "count": { "type": "num" } } },
+
+  "draftStatusEditing": "Editing",
+  "draftStatusSentUnmodified": "Sent (unmodified)",
+  "draftStatusSentEdited": "Sent (edited)",
+  "draftStatusSentManually": "Sent (marked manually)",
+  "draftStatusDiscarded": "Discarded",
+  "draftConfirmDeleteTitle": "Delete draft",
+  "draftConfirmDeleteContent": "This cannot be undone (nothing will be sent).",
+  "draftMarkSentTitle": "Mark as sent",
+  "draftMarkSentContent": "Use this when you sent the draft outside this app (e.g. in the webmail).\nOnce marked, the content is counted as a reference for future generation and learning.",
+  "draftMarkSentFeedback": "Compare my edits and improve rules",
+  "draftMarkSentFeedbackHint": "Uncheck if you changed the content again elsewhere",
+  "draftMarkSentConfirm": "Mark",
+  "draftConfirmSendTitle": "Confirm send",
+  "draftSendCcNote": "CC: {ccs}",
+  "@draftSendCcNote": { "placeholders": { "ccs": { "type": "String" } } },
+  "draftConfirmSendContent": "Will be sent to {to}{ccNote}\nSubject: Re: {subject}",
+  "@draftConfirmSendContent": {
+    "placeholders": {
+      "to": { "type": "String" },
+      "ccNote": { "type": "String" },
+      "subject": { "type": "String" }
+    }
+  },
+  "draftSendKeepEditing": "Keep editing",
+  "draftsSubtitle": "If a draft was modified before sending, the change is analyzed automatically to improve the reply rules; unsent drafts are not counted for future generation or learning",
+  "draftsEmpty": "No drafts yet — generate your first one from the inbox",
+  "draftsTileSubtitle": "{to} · {date} · based on {rules, plural, =1{1 rule} other{{rules} rules}}",
+  "@draftsTileSubtitle": {
+    "placeholders": {
+      "to": { "type": "String" },
+      "date": { "type": "String" },
+      "rules": { "type": "num" }
+    }
+  },
+  "draftNotFound": "Draft not found",
+  "draftUnsentNote": "Unsent drafts are not counted for future generation or learning; only after sending or marking as sent does the content become a reference.",
+  "draftToLine": "To: {to}",
+  "@draftToLine": { "placeholders": { "to": { "type": "String" } } },
+  "draftSenderMissing": "Send account: (no available send account in this space)",
+  "draftSenderLine": "Send account: {account}",
+  "@draftSenderLine": { "placeholders": { "account": { "type": "String" } } },
+  "draftSenderFallbackNote": " (receive account can't send; using the default send account)",
+  "draftGeneratedByLine": "Generated by: {model}",
+  "@draftGeneratedByLine": { "placeholders": { "model": { "type": "String" } } },
+  "draftStatusLine": "Status: {status}",
+  "@draftStatusLine": { "placeholders": { "status": { "type": "String" } } },
+  "draftEditHint": "The draft is generated from reply rules; edit directly or refine it via the AI chat on the right. On send, your edits are compared and the rules improve automatically.",
+  "draftCcLabel": "CC (original recipients auto-detected from forwarding; add or remove)",
+  "draftAddCcHint": "Add a CC address",
+  "draftUsedRulesTitle": "Reply rules used ({count, plural, =1{1} other{{count}}})",
+  "@draftUsedRulesTitle": { "placeholders": { "count": { "type": "num" } } },
+  "draftUsedRulesSubtitle": "Drafts are generated from rules only; anything the rules don't cover is never made up",
+  "draftRuleSourceLine": "{category} · Source: {source}",
+  "@draftRuleSourceLine": {
+    "placeholders": {
+      "category": { "type": "String" },
+      "source": { "type": "String" }
+    }
+  },
+  "draftRuleUpdatesTitle": "Rule improvements after sending",
+
+  "chatTitle": "AI refine",
+  "chatSubtitle": "Tell the AI what to change; the updated body syncs to the editor on the left",
+  "chatEmptyActive": "Chat with the AI to refine the draft, e.g.:\n\"Make the tone more sincere\" · \"Start by thanking them for the feedback\" · \"Drop the specific day-count promise\"",
+  "chatEmptyLocked": "This draft is finalized; chat is disabled",
+  "chatInputHint": "Tell the AI how to modify the draft…",
+  "chatSendButton": "Revise",
+  "chatCollapseBody": "Collapse body",
+  "chatExpandBody": "Body updated — click to view",
+  "chatBusy": "AI is revising the draft…",
+  "chatRefineFailed": "Revision failed: {error}",
+  "@chatRefineFailed": { "placeholders": { "error": { "type": "String" } } },
+
+  "kbImportButton": "Import .md / .txt documents",
+  "kbGenerateButton": "Generate rules for pending docs",
+  "kbSubtitle": "After-sales policies / FAQ / product info → distilled into reply rules; regenerate after a document changes (old rules are replaced)",
+  "kbEmpty": "No documents yet. Import .md / .txt files to generate reply rules",
+  "kbDocSubtitle": "Imported {time} · {size} KB · content {hash} · {status}",
+  "@kbDocSubtitle": {
+    "placeholders": {
+      "time": { "type": "String" },
+      "size": { "type": "String" },
+      "hash": { "type": "String" },
+      "status": { "type": "String" }
+    }
+  },
+  "kbStatusPending": "rules not generated yet",
+  "kbStatusStale": "content changed, regeneration needed",
+  "kbStatusFresh": "rules up to date",
+  "kbDeleteDoc": "Delete document",
+
+  "commonEmpty": "",
+  "commonRawError": "{text}",
+  "@commonRawError": { "placeholders": { "text": { "type": "String" } } },
+  "commonErrorSeparator": "; ",
+
+  "llmReasonNoneConfigured": "Configure an LLM in Settings first and assign it to the space",
+  "llmReasonNotAssigned": "An LLM is configured in Settings; assign it to the current space on the Spaces page",
+  "llmReasonDeleted": "The LLM assigned to this space has been deleted; reassign on the Spaces page",
+  "llmReasonIncomplete": "The LLM assigned to this space is incomplete (missing API URL or model name); finish it in Settings",
+
+  "llmErrNotConfigured": "Fill in the Base URL and model name first",
+  "llmErrTruncated": "Output truncated by max_tokens (reasoning models' thinking counts toward the budget); increase max tokens",
+  "llmErrEmptyPlain": "The model returned no content",
+  "llmErrEmptyReason": "The model returned no content (finish_reason={reason})",
+  "@llmErrEmptyReason": { "placeholders": { "reason": { "type": "String" } } },
+  "llmErrNotJson": "The model failed to output valid JSON after retries: {error}",
+  "@llmErrNotJson": { "placeholders": { "error": { "type": "String" } } },
+  "llmErrHttp": "HTTP {status}: {detail}",
+  "@llmErrHttp": {
+    "placeholders": {
+      "status": { "type": "String" },
+      "detail": { "type": "String" }
+    }
+  },
+  "llmErrTimeout": "Request timed out ({seconds}s); increase the timeout in Settings",
+  "@llmErrTimeout": { "placeholders": { "seconds": { "type": "num" } } },
+  "llmErrNetwork": "Network error",
+
+  "mailOpTimeout": "Mail operation did not complete within {seconds}s and was aborted (network unreachable or server unresponsive; try refreshing later)",
+  "@mailOpTimeout": { "placeholders": { "seconds": { "type": "num" } } },
+  "mailOauthNotAuthorized": "This account signs in with OAuth2 (Outlook); complete Microsoft authorization in the account settings first",
+  "mailReceiveIncomplete": "Receive configuration incomplete (address / IMAP server / password)",
+  "mailSendIncomplete": "Send configuration incomplete (address / SMTP server / password)",
+  "mailConnectTimeout": "Connecting to {host}:{port} timed out (auto-retried once): the server went silent after TLS, usually packet loss on a proxy/VPN node — switch nodes or disable the proxy temporarily and retry",
+  "@mailConnectTimeout": {
+    "placeholders": {
+      "host": { "type": "String" },
+      "port": { "type": "num" }
+    }
+  },
+  "mailTokenRefreshStall": "Microsoft token refresh stalled (two 22-second rounds with no progress): direct connections to login.microsoftonline.com are being blocked by the network — switch nodes, use global mode, or disable the proxy temporarily and retry",
+  "mailFrTokenTimeout": "Cannot refresh the Microsoft token: direct connections to login.microsoftonline.com are blocked (usually a proxy/VPN issue). Switch nodes or use global mode in your proxy app and retry; it also recovers automatically once the network is back.",
+  "mailFrInvalidGrant": "Microsoft authorization has expired ({raw}); sign in again in the account settings on the Spaces page",
+  "@mailFrInvalidGrant": { "placeholders": { "raw": { "type": "String" } } },
+  "mailFrAuthRejected": "Login rejected by the server ({raw}). Personal Outlook accounts need IMAP enabled in the web settings: Settings → Mail → Sync email → POP and IMAP; for organizational accounts ask the admin to allow IMAP",
+  "@mailFrAuthRejected": { "placeholders": { "raw": { "type": "String" } } },
+
+  "oauthBrowserFailed": "Could not open the system browser; open this link manually to authorize:\n{url}",
+  "@oauthBrowserFailed": { "placeholders": { "url": { "type": "String" } } },
+  "oauthWaitTimeout": "Timed out waiting for browser authorization (5 minutes); try again",
+  "oauthStateMismatch": "Authorization callback validation failed (state mismatch); try again",
+  "oauthAccessDenied": "You canceled the authorization{detail}",
+  "@oauthAccessDenied": { "placeholders": { "detail": { "type": "String" } } },
+  "oauthRejected": "Authorization denied: {error}{detail}",
+  "@oauthRejected": {
+    "placeholders": {
+      "error": { "type": "String" },
+      "detail": { "type": "String" }
+    }
+  },
+  "oauthNoCode": "Authorization callback is missing the code; try again",
+  "oauthTokenTimeout": "Timed out connecting to the Microsoft token service (no response in 20s): direct connections may be blocked by a proxy/VPN — check your proxy app (try switching nodes or global mode) and retry",
+  "oauthConnectFailed": "Failed to connect to the Microsoft token service: {error}",
+  "@oauthConnectFailed": { "placeholders": { "error": { "type": "String" } } },
+  "oauthHttpError": "Microsoft token endpoint returned HTTP {status}: {detail}",
+  "@oauthHttpError": {
+    "placeholders": {
+      "status": { "type": "String" },
+      "detail": { "type": "String" }
+    }
+  },
+  "oauthNoBody": "no response body",
+  "oauthTokenError": "Microsoft returned an authorization error: {error}{detail}",
+  "@oauthTokenError": {
+    "placeholders": {
+      "error": { "type": "String" },
+      "detail": { "type": "String" }
+    }
+  },
+  "oauthParseFailed": "Failed to parse the token returned by Microsoft: {error}",
+  "@oauthParseFailed": { "placeholders": { "error": { "type": "String" } } },
+
+  "learnFetchingHistory": "Fetching history emails…",
+  "learnFetchingFolder": "Fetching {folder} of {email} (last {months} months)…",
+  "@learnFetchingFolder": {
+    "placeholders": {
+      "email": { "type": "String" },
+      "folder": { "type": "String" },
+      "months": { "type": "num" }
+    }
+  },
+  "learnFetchingDetected": "Fetching {folder} of {email} (auto-detected)…",
+  "@learnFetchingDetected": {
+    "placeholders": {
+      "email": { "type": "String" },
+      "folder": { "type": "String" }
+    }
+  },
+  "learnFetchingInbox": "Fetching INBOX of {email} (pairing customer mails)…",
+  "@learnFetchingInbox": { "placeholders": { "email": { "type": "String" } } },
+  "learnFailedNote": "; {count} accounts/folders failed to fetch (see warnings below)",
+  "@learnFailedNote": { "placeholders": { "count": { "type": "num" } } },
+  "learnRecoveredNote": "; learn folders of {count} account(s) auto-detected and config updated",
+  "@learnRecoveredNote": { "placeholders": { "count": { "type": "num" } } },
+  "learnNoNewEmails": "No new emails to learn (all consumed or outside the time range){failed}{recovered}",
+  "@learnNoNewEmails": {
+    "placeholders": {
+      "failed": { "type": "String" },
+      "recovered": { "type": "String" }
+    }
+  },
+  "learnDone": "Learning finished: {added} rules added, {updated} updated, {consumed} emails consumed{failed}{recovered}",
+  "@learnDone": {
+    "placeholders": {
+      "added": { "type": "num" },
+      "updated": { "type": "num" },
+      "consumed": { "type": "num" },
+      "failed": { "type": "String" },
+      "recovered": { "type": "String" }
+    }
+  },
+  "learnErrNeedSpace": "Create a space and configure email accounts on the Spaces page first",
+  "learnErrIncomplete": "No account in this space is fully configured (missing server or password)",
+  "learnErrFailed": "Learning failed: {error}",
+  "@learnErrFailed": { "placeholders": { "error": { "type": "String" } } },
+  "learnErrNoRulesArray": "The model output object contains no rules array",
+  "learnErrNotRulesArray": "The model output is not a rules array ({type})",
+  "@learnErrNotRulesArray": { "placeholders": { "type": { "type": "String" } } },
+  "learnStageAnalyzing": "Analyzing thread batch {index}/{total}",
+  "@learnStageAnalyzing": {
+    "placeholders": {
+      "index": { "type": "num" },
+      "total": { "type": "num" }
+    }
+  },
+  "learnStageMerging": "Merging rules (batch {index}/{total})",
+  "@learnStageMerging": {
+    "placeholders": {
+      "index": { "type": "num" },
+      "total": { "type": "num" }
+    }
+  },
+  "kbStageExtracting": "Extracting rules from \"{doc}\" (chunk {index}/{total})",
+  "@kbStageExtracting": {
+    "placeholders": {
+      "doc": { "type": "String" },
+      "index": { "type": "num" },
+      "total": { "type": "num" }
+    }
+  },
+
+  "kbImporting": "Importing documents…",
+  "kbImported": "Import finished: {count} documents",
+  "@kbImported": { "placeholders": { "count": { "type": "num" } } },
+  "kbImportFailed": "Import failed: {error}",
+  "@kbImportFailed": { "placeholders": { "error": { "type": "String" } } },
+  "kbPreparing": "Preparing rule generation…",
+  "kbNoDocs": "No documents need rule generation",
+  "kbGenerated": "Generated {rules} rules for {docs} documents",
+  "@kbGenerated": {
+    "placeholders": {
+      "docs": { "type": "num" },
+      "rules": { "type": "num" }
+    }
+  },
+  "kbGenerateFailed": "Generation failed: {error}",
+  "@kbGenerateFailed": { "placeholders": { "error": { "type": "String" } } },
+
+  "inboxPreparing": "Preparing to sync…",
+  "inboxSyncing": "Syncing {email} {role}…",
+  "@inboxSyncing": {
+    "placeholders": {
+      "email": { "type": "String" },
+      "role": { "type": "String" }
+    }
+  },
+  "inboxErrNoSpace": "Create a space and configure email accounts on the Spaces page first",
+  "inboxErrNoReceiver": "No account in the current space has receiving enabled",
+  "inboxErrIncomplete": "{email}: incomplete configuration ({reason})",
+  "@inboxErrIncomplete": {
+    "placeholders": {
+      "email": { "type": "String" },
+      "reason": { "type": "String" }
+    }
+  },
+  "inboxReasonNoImap": "missing IMAP server configuration",
+  "inboxReasonOauth": "Microsoft authorization not completed (sign in again in the account settings)",
+  "inboxReasonNoPassword": "missing password (keychain returned no app password for this account)",
+  "inboxErrSentMissing": "{email}: sent folder not found, skipped",
+  "@inboxErrSentMissing": { "placeholders": { "email": { "type": "String" } } },
+  "inboxErrSyncFailedCached": "{email} {role}: sync failed (showing cache): {error}",
+  "@inboxErrSyncFailedCached": {
+    "placeholders": {
+      "email": { "type": "String" },
+      "role": { "type": "String" },
+      "error": { "type": "String" }
+    }
+  },
+  "inboxErrSyncFailed": "{email} {role}: {error}",
+  "@inboxErrSyncFailed": {
+    "placeholders": {
+      "email": { "type": "String" },
+      "role": { "type": "String" },
+      "error": { "type": "String" }
+    }
+  },
+  "inboxErrInterrupted": "Refresh interrupted: {error}",
+  "@inboxErrInterrupted": { "placeholders": { "error": { "type": "String" } } },
+
+  "draftsErrNeedSpace": "Create a space first",
+  "draftsMsgExisting": "An in-progress draft already exists for this email; opened it for you",
+  "draftsErrRulesEmpty": "The rule library is empty: drafts are generated from reply rules only — generate rules first in Learning / Knowledge / Rules",
+  "draftsErrRulesDisabled": "All rules are currently disabled; enable rules in the rule library first",
+  "draftsErrRulesEmptyGen": "The rule library is empty; generate reply rules from history emails, the knowledge base, or a custom prompt first",
+  "draftsErrGenerateFailed": "Draft generation failed: {error}",
+  "@draftsErrGenerateFailed": { "placeholders": { "error": { "type": "String" } } },
+  "draftsErrNoSender": "No account in this space can send (enable sending for an account in Spaces)",
+  "draftsErrSendFailed": "Send failed: {error}",
+  "@draftsErrSendFailed": { "placeholders": { "error": { "type": "String" } } },
+  "draftsErrNoBody": "The model did not return a revised body",
+  "draftsFbSent": "Sent. {feedback}",
+  "@draftsFbSent": { "placeholders": { "feedback": { "type": "String" } } },
+  "draftsFbModifiedNoAdjust": "Edits detected; rules optimized: no adjustments needed this time",
+  "draftsFbModifiedUpdates": "Edits detected; rules optimized: {updates}",
+  "@draftsFbModifiedUpdates": { "placeholders": { "updates": { "type": "String" } } },
+  "draftsFbUnmodified": "The draft was sent unmodified; related rules got positive feedback",
+  "draftsFbFailed": ", but rule feedback learning failed: {error}",
+  "@draftsFbFailed": { "placeholders": { "error": { "type": "String" } } },
+  "draftsFbSkipped": "(no LLM configured; rule feedback learning skipped)",
+  "draftsMarkedPlain": "Marked as sent manually. The content is counted as a reference for future generation and learning.",
+  "draftsMarkedWithFeedback": "Marked as sent manually. {feedback}",
+  "@draftsMarkedWithFeedback": { "placeholders": { "feedback": { "type": "String" } } }
+}

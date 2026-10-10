@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show appFlavor;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../l10n/l10n_ext.dart';
 import '../providers/app_providers.dart';
 import 'drafts/drafts_page.dart';
 import 'inbox/inbox_page.dart';
@@ -35,6 +36,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Scaffold(
       body: Row(
         children: [
@@ -43,41 +45,41 @@ class _HomePageState extends State<HomePage> {
             onDestinationSelected: (i) => setState(() => _index = i),
             labelType: NavigationRailLabelType.all,
             minWidth: 84,
-            destinations: const [
+            destinations: [
               NavigationRailDestination(
-                icon: Icon(Icons.inbox_outlined),
-                selectedIcon: Icon(Icons.inbox),
-                label: Text('邮件列表'),
+                icon: const Icon(Icons.inbox_outlined),
+                selectedIcon: const Icon(Icons.inbox),
+                label: Text(l10n.navInbox),
               ),
               NavigationRailDestination(
-                icon: Icon(Icons.edit_note_outlined),
-                selectedIcon: Icon(Icons.edit_note),
-                label: Text('草稿箱'),
+                icon: const Icon(Icons.edit_note_outlined),
+                selectedIcon: const Icon(Icons.edit_note),
+                label: Text(l10n.navDrafts),
               ),
               NavigationRailDestination(
-                icon: Icon(Icons.rule_outlined),
-                selectedIcon: Icon(Icons.rule),
-                label: Text('规则库'),
+                icon: const Icon(Icons.rule_outlined),
+                selectedIcon: const Icon(Icons.rule),
+                label: Text(l10n.navRules),
               ),
               NavigationRailDestination(
-                icon: Icon(Icons.menu_book_outlined),
-                selectedIcon: Icon(Icons.menu_book),
-                label: Text('知识库'),
+                icon: const Icon(Icons.menu_book_outlined),
+                selectedIcon: const Icon(Icons.menu_book),
+                label: Text(l10n.navKb),
               ),
               NavigationRailDestination(
-                icon: Icon(Icons.school_outlined),
-                selectedIcon: Icon(Icons.school),
-                label: Text('学习中心'),
+                icon: const Icon(Icons.school_outlined),
+                selectedIcon: const Icon(Icons.school),
+                label: Text(l10n.navLearn),
               ),
               NavigationRailDestination(
-                icon: Icon(Icons.workspaces_outlined),
-                selectedIcon: Icon(Icons.workspaces),
-                label: Text('空间'),
+                icon: const Icon(Icons.workspaces_outlined),
+                selectedIcon: const Icon(Icons.workspaces),
+                label: Text(l10n.navSpaces),
               ),
               NavigationRailDestination(
-                icon: Icon(Icons.settings_outlined),
-                selectedIcon: Icon(Icons.settings),
-                label: Text('设置'),
+                icon: const Icon(Icons.settings_outlined),
+                selectedIcon: const Icon(Icons.settings),
+                label: Text(l10n.navSettings),
               ),
             ],
           ),
@@ -103,6 +105,7 @@ class _SpaceSwitcherBar extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
     final spacesState = ref.watch(spacesProvider);
     final cur = ref.watch(currentSpaceProvider);
     final space = cur.space;
@@ -121,7 +124,7 @@ class _SpaceSwitcherBar extends ConsumerWidget {
           const Icon(Icons.workspaces_outlined, size: 18),
           const SizedBox(width: 6),
           PopupMenuButton<String>(
-            tooltip: '切换空间',
+            tooltip: l10n.switchSpaceTooltip,
             position: PopupMenuPosition.under,
             initialValue: space?.id,
             enabled: spacesState.spaces.isNotEmpty,
@@ -146,7 +149,7 @@ class _SpaceSwitcherBar extends ConsumerWidget {
                       Expanded(
                           child: Text(s.name, overflow: TextOverflow.ellipsis)),
                       const SizedBox(width: 8),
-                      Text('${s.accounts.length} 账号',
+                      Text(l10n.accountsCount(s.accounts.length),
                           style: Theme.of(context).textTheme.bodySmall),
                     ],
                   ),
@@ -157,7 +160,9 @@ class _SpaceSwitcherBar extends ConsumerWidget {
               children: [
                 Text(
                   space?.name ??
-                      (spacesState.loaded ? '未选择空间' : '加载中…'),
+                      (spacesState.loaded
+                          ? l10n.noSpaceSelected
+                          : l10n.loading),
                   style: Theme.of(context).textTheme.titleSmall,
                 ),
                 const Icon(Icons.arrow_drop_down),
@@ -167,7 +172,7 @@ class _SpaceSwitcherBar extends ConsumerWidget {
           if (space != null) ...[
             const SizedBox(width: 12),
             Text(
-              '${space.receiveAccounts.length} 收 / ${space.sendAccounts.length} 发'
+              '${l10n.spaceReceiveSend(space.receiveAccounts.length, space.sendAccounts.length)}'
               '${llmName == null ? "" : " · $llmName"}',
               style: Theme.of(context)
                   .textTheme
@@ -177,7 +182,7 @@ class _SpaceSwitcherBar extends ConsumerWidget {
           ],
           const Spacer(),
           IconButton(
-            tooltip: '新建空间',
+            tooltip: l10n.newSpaceTooltip,
             icon: const Icon(Icons.add),
             onPressed: () => _createSpace(context, ref),
           ),
@@ -187,27 +192,28 @@ class _SpaceSwitcherBar extends ConsumerWidget {
   }
 
   Future<void> _createSpace(BuildContext context, WidgetRef ref) async {
+    final l10n = context.l10n;
     final controller = TextEditingController();
     final name = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('新建空间'),
+        title: Text(l10n.newSpaceTitle),
         content: TextField(
           controller: controller,
           autofocus: true,
-          decoration: const InputDecoration(
-            labelText: '空间名称（如店铺 / 品牌名）',
-            border: OutlineInputBorder(),
+          decoration: InputDecoration(
+            labelText: l10n.spaceNameLabel,
+            border: const OutlineInputBorder(),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
+            child: Text(l10n.commonCancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('创建'),
+            child: Text(l10n.commonCreate),
           ),
         ],
       ),

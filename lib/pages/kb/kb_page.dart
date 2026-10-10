@@ -2,6 +2,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../l10n/l10n_ext.dart';
+import '../../l10n/resolve_msg.dart';
 import '../../providers/app_providers.dart';
 
 /// 知识库：导入文档（复制进应用目录）、hash 变更检测、生成规则。
@@ -10,6 +12,7 @@ class KbPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
     final state = ref.watch(kbProvider);
 
     return ListView(
@@ -17,12 +20,12 @@ class KbPage extends ConsumerWidget {
       children: [
         Row(
           children: [
-            Text('知识库', style: Theme.of(context).textTheme.headlineSmall),
+            Text(l10n.navKb, style: Theme.of(context).textTheme.headlineSmall),
             const Spacer(),
             OutlinedButton.icon(
               onPressed: state.busy ? null : () => _pickFiles(ref),
               icon: const Icon(Icons.upload_file),
-              label: const Text('导入 .md / .txt 文档'),
+              label: Text(l10n.kbImportButton),
             ),
             const SizedBox(width: 8),
             FilledButton.icon(
@@ -33,37 +36,38 @@ class KbPage extends ConsumerWidget {
                       height: 14,
                       child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.auto_awesome),
-              label: Text(state.busy ? '生成中…' : '为待生成文档生成规则'),
+              label: Text(state.busy ? l10n.inboxGenerating : l10n.kbGenerateButton),
             ),
           ],
         ),
         const SizedBox(height: 4),
         Text(
-          '售后政策 / FAQ / 商品信息 → 提炼为回复规则；文档内容变更后可重新生成（旧规则会被替换）',
+          l10n.kbSubtitle,
           style: Theme.of(context).textTheme.bodySmall,
         ),
-        if (state.progress.isNotEmpty)
+        if (state.progress != null)
           Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: Text(state.progress,
+            child: Text(resolveL10nMsg(l10n, state.progress!),
                 style: const TextStyle(color: Colors.blue)),
           ),
         if (state.message != null)
           Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: Text(state.message!,
+            child: Text(resolveL10nMsg(l10n, state.message!),
                 style: const TextStyle(color: Colors.green)),
           ),
         if (state.error != null)
           Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: Text(state.error!, style: const TextStyle(color: Colors.red)),
+            child: Text(resolveL10nMsg(l10n, state.error!),
+                style: const TextStyle(color: Colors.red)),
           ),
         const SizedBox(height: 16),
         if (state.docs.isEmpty)
-          const Padding(
-            padding: EdgeInsets.only(top: 48),
-            child: Center(child: Text('暂无文档。导入 .md / .txt 文件后即可生成回复规则')),
+          Padding(
+            padding: const EdgeInsets.only(top: 48),
+            child: Center(child: Text(l10n.kbEmpty)),
           ),
         for (final doc in state.docs)
           Card(
@@ -79,13 +83,20 @@ class KbPage extends ConsumerWidget {
               ),
               title: Text(doc.fileName),
               subtitle: Text(
-                '导入于 ${doc.importedAt.substring(0, 19)} · ${(doc.sizeBytes / 1024).toStringAsFixed(1)} KB · '
-                '内容 ${doc.contentHash.substring(0, 10)} · '
-                '${doc.ruleGeneratedHash == null ? "尚未生成规则" : (doc.needsRuleGeneration ? "内容已变更，待重新生成" : "规则已是最新")}',
+                l10n.kbDocSubtitle(
+                  doc.importedAt.substring(0, 19),
+                  (doc.sizeBytes / 1024).toStringAsFixed(1),
+                  doc.contentHash.substring(0, 10),
+                  doc.ruleGeneratedHash == null
+                      ? l10n.kbStatusPending
+                      : (doc.needsRuleGeneration
+                          ? l10n.kbStatusStale
+                          : l10n.kbStatusFresh),
+                ),
               ),
               trailing: IconButton(
                 icon: const Icon(Icons.delete_outline),
-                tooltip: '删除文档',
+                tooltip: l10n.kbDeleteDoc,
                 onPressed: () => ref.read(kbProvider.notifier).remove(doc.fileName),
               ),
             ),

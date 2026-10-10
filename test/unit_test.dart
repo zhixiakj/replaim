@@ -5,6 +5,7 @@ import 'package:replaim/models/draft_record.dart';
 import 'package:replaim/models/email_summary.dart';
 import 'package:replaim/models/learn_state.dart';
 import 'package:replaim/models/rule.dart';
+import 'package:replaim/l10n/messages.dart';
 import 'package:replaim/services/feedback_learner.dart';
 import 'package:replaim/services/json_extract.dart';
 import 'package:replaim/services/rule_generators.dart';
@@ -403,11 +404,14 @@ void main() {
       expect(items.first.content, '开头称呼用 Hi');
     });
 
-    test('非法输入抛 FormatException（不再静默吞掉）', () {
-      expect(() => RuleGenerators.parseRuleItems(42), throwsFormatException);
-      expect(() => RuleGenerators.parseRuleItems('完全不是 JSON'),
-          throwsFormatException);
+    test('非法输入抛错（不再静默吞掉；结构化 LocalizedError / 原文走 FormatException）', () {
+      // 42（非 List/Map/String）与无规则数组的 Map → LocalizedError（结构化消息）。
+      expect(() => RuleGenerators.parseRuleItems(42),
+          throwsA(isA<LocalizedError>()));
       expect(() => RuleGenerators.parseRuleItems({'summary': 'x'}),
+          throwsA(isA<LocalizedError>()));
+      // 非 JSON 字符串 → extractJson 的 FormatException（llm_client 靠它做重试）。
+      expect(() => RuleGenerators.parseRuleItems('完全不是 JSON'),
           throwsFormatException);
     });
   });

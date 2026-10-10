@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:enough_mail/enough_mail.dart' as mail;
 import 'package:enough_mail/enough_mail.dart' show SocketType;
 
+import '../l10n/messages.dart';
 import '../models/email_summary.dart';
 import '../models/mail_space.dart';
 import 'app_log.dart';
@@ -93,12 +94,11 @@ class MailService {
     } on TimeoutException {
       AppLog.log('mail', '「$op」超时（${timeout.inSeconds}s）${config.email}');
       _forceDisconnectLast();
-      throw MailException('「$op」超过 ${timeout.inSeconds} 秒未完成，已中止'
-          '（网络不通或服务器无响应，可稍后刷新重试）');
+      throw LocalizedError(L10nMsg('mailOpTimeout', [timeout.inSeconds]));
     } on FolderNotFoundException {
       rethrow; // 调用方按「跳过已发送文件夹」分支处理
     } catch (e) {
-      throw MailException(_friendlyErrorText(e));
+      throw LocalizedError(_friendlyErrorText(e));
     }
   }
 
@@ -113,34 +113,38 @@ class MailService {
   }
 
   /// 把底层库 / 服务器的原始报错翻译成可操作的提示（仅 OAuth 账号追加建议）。
-  String _friendlyErrorText(Object e) {
+  /// 返回结构化消息，UI 层按 locale 渲染。
+  L10nMsg _friendlyErrorText(Object e) {
     final raw = e.toString();
-    if (!_useOAuth) return raw;
+    if (e is LocalizedError) {
+      // 上游已本地化（OAuth / 超时等），仅在命中分类时换更具体的指引。
+      final key = e.msg.key;
+      if (key == 'oauthTokenTimeout') return const L10nMsg('mailFrTokenTimeout');
+      return e.msg;
+    }
+    if (!_useOAuth) return L10nMsg('commonRawError', [raw]);
     final lower = raw.toLowerCase();
     if (lower.contains('连接微软令牌服务超时')) {
-      return '无法刷新 Microsoft 令牌：应用直连 login.microsoftonline.com '
-          '被拦截（通常是代理/VPN 问题）。请在代理软件中切换节点或改用'
-          '全局模式后重试；现在网络恢复时也会自动好转。';
+      return const L10nMsg('mailFrTokenTimeout');
     }
     if (lower.contains('unable to refresh token') ||
         lower.contains('invalid_grant')) {
-      return 'Microsoft 授权已失效（$raw），请在「空间」页的账号设置里重新登录';
+      return L10nMsg('mailFrInvalidGrant', [raw]);
     }
     if ((lower.contains('authenticate') && lower.contains('fail')) ||
         lower.contains('authenticationfailed') ||
         lower.contains('invalid credentials')) {
-      return '登录被服务器拒绝（$raw）。Outlook 个人账号需先在网页版开启 IMAP：'
-          '设置 → 邮件 → 同步邮件 → POP 和 IMAP；企业账号请联系管理员放行 IMAP';
+      return L10nMsg('mailFrAuthRejected', [raw]);
     }
-    return raw;
+    return L10nMsg('commonRawError', [raw]);
   }
 
   Future<mail.MailClient> _connect(
       {Duration timeout = const Duration(seconds: 20)}) async {
     if (!isReceiveReady) {
-      throw MailException(_useOAuth
-          ? '该账号为 OAuth2 登录（Outlook），请先在账号设置里完成 Microsoft 授权'
-          : '邮箱账号收信配置不完整（地址/IMAP 服务器/密码）');
+      throw LocalizedError(_useOAuth
+          ? const L10nMsg('mailOauthNotAuthorized')
+          : const L10nMsg('mailReceiveIncomplete'));
     }
     if (_useOAuth && _oauthToken != null) {
       final expiry = _oauthToken!.expiresDateTime;
@@ -168,9 +172,8 @@ class MailService {
         await Future<void>.delayed(const Duration(seconds: 2));
       }
     }
-    throw MailException('连接 ${config.imapHost}:${config.imapPort} 超时'
-        '（已自动重试一次）：服务器完成 TLS 后无响应，通常是代理/VPN 节点'
-        '丢包——请切换代理节点、或暂时关闭代理后重试');
+    throw LocalizedError(L10nMsg('mailConnectTimeout',
+        [config.imapHost, config.imapPort]));
   }
 
   /// 连接阶段（库内 token 刷新 + TCP/TLS + 等服务器问候）的整体上限。
@@ -250,9 +253,7 @@ class MailService {
         ).timeout(const Duration(seconds: 22));
       } on TimeoutException {
         AppLog.log('mail', '刷新重试仍停滞，放弃 ${config.email}');
-        throw MailException('刷新 Microsoft 令牌停滞（两轮各 22 秒均无任何进展）：'
-            '应用直连 login.microsoftonline.com 被网络层拦截——'
-            '请在代理软件中切换节点、改用全局模式或暂时关闭代理后重试');
+        throw const LocalizedError(L10nMsg('mailTokenRefreshStall'));
       }
     }
     AppLog.log('mail', '刷新接口返回 ${config.email}'
@@ -293,7 +294,7 @@ class MailService {
   }
 
   /// 测试 IMAP 连通性，返回错误信息（null = 成功）。
-  Future<String?> testConnection() => _guarded(
+  Future<L10nMsg?> testConnection() => _guarded(
         '测试连接',
         () async {
           mail.MailClient? client;
@@ -584,9 +585,9 @@ class MailService {
   }) =>
       _guarded('发送邮件', () async {
         if (!isSendReady) {
-          throw MailException(_useOAuth
-              ? '该账号为 OAuth2 登录（Outlook），请先在账号设置里完成 Microsoft 授权'
-              : '邮箱账号发信配置不完整（地址/SMTP 服务器/密码）');
+          throw LocalizedError(_useOAuth
+              ? const L10nMsg('mailOauthNotAuthorized')
+              : const L10nMsg('mailSendIncomplete'));
         }
         final client = await _connect();
         try {

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../l10n/date_format.dart';
+import '../../l10n/l10n_ext.dart';
+import '../../l10n/model_labels.dart';
 import '../../models/rule.dart';
 import '../../providers/app_providers.dart';
 
@@ -20,6 +23,7 @@ class _RulesPageState extends ConsumerState<RulesPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final state = ref.watch(rulesProvider);
     var rules = state.rules.toList();
     if (_filterSource != null) {
@@ -43,17 +47,17 @@ class _RulesPageState extends ConsumerState<RulesPage> {
           padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
           child: Row(
             children: [
-              Text('规则库', style: Theme.of(context).textTheme.headlineSmall),
+              Text(l10n.navRules, style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(width: 12),
               Text(
-                '启用 ${state.enabled.length} / 共 ${state.rules.length} 条',
+                l10n.rulesEnabledSummary(state.enabled.length, state.rules.length),
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const Spacer(),
               OutlinedButton.icon(
                 onPressed: _addManualRule,
                 icon: const Icon(Icons.add),
-                label: const Text('手动添加'),
+                label: Text(l10n.rulesAddManual),
               ),
             ],
           ),
@@ -70,19 +74,20 @@ class _RulesPageState extends ConsumerState<RulesPage> {
                 height: 36,
                 child: TextField(
                   onChanged: (v) => setState(() => _search = v),
-                  decoration: const InputDecoration(
-                    hintText: '搜索规则内容',
-                    prefixIcon: Icon(Icons.search, size: 18),
+                  decoration: InputDecoration(
+                    hintText: l10n.rulesSearchHint,
+                    prefixIcon: const Icon(Icons.search, size: 18),
                     isDense: true,
-                    border: OutlineInputBorder(),
+                    border: const OutlineInputBorder(),
                   ),
                 ),
               ),
-              _sourceChip(null, '全部来源'),
-              for (final t in RuleSourceType.values) _sourceChip(t, t.label),
+              _sourceChip(null, l10n.rulesFilterAllSources),
+              for (final t in RuleSourceType.values)
+                _sourceChip(t, ruleSourceTypeLabel(l10n, t)),
               const SizedBox(width: 8),
               FilterChip(
-                label: const Text('只看启用'),
+                label: Text(l10n.rulesFilterEnabledOnly),
                 selected: _filterEnabledOnly,
                 onSelected: (v) => setState(() => _filterEnabledOnly = v),
               ),
@@ -92,9 +97,8 @@ class _RulesPageState extends ConsumerState<RulesPage> {
         const SizedBox(height: 8),
         Expanded(
           child: state.rules.isEmpty && state.loaded
-              ? const Center(
-                  child: Text('规则库为空：去「学习中心」学习历史邮件、\n'
-                      '「知识库」导入文档、或「设置」添加自定义 Prompt',
+              ? Center(
+                  child: Text(l10n.rulesEmpty,
                       textAlign: TextAlign.center),
                 )
               : ListView.builder(
@@ -114,13 +118,14 @@ class _RulesPageState extends ConsumerState<RulesPage> {
       );
 
   Future<void> _addManualRule() async {
+    final l10n = context.l10n;
     final content = TextEditingController();
     var category = RuleCategory.other;
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('手动添加规则'),
+          title: Text(l10n.rulesAddManualTitle),
           content: SizedBox(
             width: 440,
             child: Column(
@@ -129,18 +134,19 @@ class _RulesPageState extends ConsumerState<RulesPage> {
                 TextField(
                   controller: content,
                   maxLines: 3,
-                  decoration: const InputDecoration(
-                    labelText: '规则内容',
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: l10n.rulesFieldContent,
+                    border: const OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<RuleCategory>(
                   initialValue: category,
-                  decoration: const InputDecoration(labelText: '类目'),
+                  decoration: InputDecoration(labelText: l10n.rulesFieldCategory),
                   items: [
                     for (final c in RuleCategory.values)
-                      DropdownMenuItem(value: c, child: Text(c.label)),
+                      DropdownMenuItem(
+                          value: c, child: Text(ruleCategoryLabel(l10n, c))),
                   ],
                   onChanged: (v) =>
                       v == null ? null : setDialogState(() => category = v),
@@ -151,10 +157,10 @@ class _RulesPageState extends ConsumerState<RulesPage> {
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(context, false),
-                child: const Text('取消')),
+                child: Text(l10n.commonCancel)),
             FilledButton(
                 onPressed: () => Navigator.pop(context, true),
-                child: const Text('添加')),
+                child: Text(l10n.commonAdd)),
           ],
         ),
       ),
@@ -174,6 +180,7 @@ class _RuleTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
@@ -184,9 +191,10 @@ class _RuleTile extends ConsumerWidget {
         ),
         title: Text(rule.content, maxLines: 2, overflow: TextOverflow.ellipsis),
         subtitle: Text(
-          '${rule.source.type.label} · ${rule.category.label}'
+          '${ruleSourceTypeLabel(l10n, rule.source.type)} · '
+          '${ruleCategoryLabel(l10n, rule.category)}'
           '${rule.version > 1 ? " · v${rule.version}" : ""}'
-          '${rule.supersededBy != null ? " · 已被新规则取代" : ""}',
+          '${rule.supersededBy != null ? " · ${l10n.rulesSuperseded}" : ""}',
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
@@ -195,11 +203,10 @@ class _RuleTile extends ConsumerWidget {
               Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: Tooltip(
-                  message: '使用 ${rule.stats.usedCount} 次 · '
-                      '未改直接发 ${rule.stats.keptUnchangedCount} 次 · '
-                      '被修改 ${rule.stats.editedCount} 次',
+                  message: l10n.rulesStatsTooltip(rule.stats.usedCount,
+                      rule.stats.keptUnchangedCount, rule.stats.editedCount),
                   child: Text(
-                    '${rule.stats.usedCount}次',
+                    l10n.rulesUsedTimes(rule.stats.usedCount),
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),
@@ -236,6 +243,7 @@ class _RuleDetailDialog extends ConsumerStatefulWidget {
 class _RuleDetailDialogState extends ConsumerState<_RuleDetailDialog> {
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     // 从 provider 里取最新版（编辑后内容会变）。
     final rule = ref
             .watch(rulesProvider)
@@ -245,7 +253,7 @@ class _RuleDetailDialogState extends ConsumerState<_RuleDetailDialog> {
         widget.rule;
 
     return AlertDialog(
-      title: Text('规则详情'),
+      title: Text(l10n.rulesDetailTitle),
       content: SizedBox(
         width: 520,
         child: SingleChildScrollView(
@@ -255,35 +263,44 @@ class _RuleDetailDialogState extends ConsumerState<_RuleDetailDialog> {
             children: [
               Text(rule.content, style: const TextStyle(fontSize: 15, height: 1.5)),
               const SizedBox(height: 12),
-              _kv('类目', rule.category.label),
-              _kv('状态',
-                  rule.enabled ? '启用' : (rule.supersededBy != null ? '已被取代' : '停用')),
-              _kv('当前版本', 'v${rule.version}'),
-              _kv('使用统计',
-                  '使用 ${rule.stats.usedCount} 次 / 未改发送 ${rule.stats.keptUnchangedCount} / 被修改 ${rule.stats.editedCount}'),
+              _kv(l10n.rulesKvCategory, ruleCategoryLabel(l10n, rule.category)),
+              _kv(
+                  l10n.rulesKvStatus,
+                  rule.enabled
+                      ? l10n.rulesStatusEnabled
+                      : (rule.supersededBy != null
+                          ? l10n.rulesStatusSuperseded
+                          : l10n.rulesStatusDisabled)),
+              _kv(l10n.rulesKvVersion, 'v${rule.version}'),
+              _kv(
+                  l10n.rulesKvStats,
+                  l10n.rulesStatsDetail(rule.stats.usedCount,
+                      rule.stats.keptUnchangedCount, rule.stats.editedCount)),
               const Divider(height: 24),
-              Text('来源（这条规则怎么来的）',
+              Text(l10n.rulesSourceSection,
                   style: Theme.of(context).textTheme.titleSmall),
               const SizedBox(height: 4),
-              _kv('类型', rule.source.type.label),
+              _kv(l10n.rulesKvType, ruleSourceTypeLabel(l10n, rule.source.type)),
               if (rule.source.generatedBy.isNotEmpty)
-                _kv('生成模型', rule.source.generatedBy),
-              _kv('生成时间', rule.source.createdAt.toIso8601String().substring(0, 19)),
+                _kv(l10n.rulesKvGeneratedBy, rule.source.generatedBy),
+              _kv(l10n.rulesKvCreatedAt,
+                  formatDateTimeShort(context, rule.source.createdAt)),
               ..._sourceDetails(rule),
               if (rule.history.isNotEmpty) ...[
                 const Divider(height: 24),
-                Text('版本历史', style: Theme.of(context).textTheme.titleSmall),
+                Text(l10n.rulesHistorySection,
+                    style: Theme.of(context).textTheme.titleSmall),
                 for (final h in rule.history.reversed)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('v${h.version} · ${h.updatedAt.toIso8601String().substring(0, 19)}'),
+                        Text('v${h.version} · ${formatDateTimeShort(context, h.updatedAt)}'),
                         Text(h.content,
                             style: const TextStyle(color: Colors.grey)),
                         if (h.reason.isNotEmpty)
-                          Text('变更原因：${h.reason}',
+                          Text(l10n.rulesChangeReason(h.reason),
                               style: TextStyle(
                                   color: Colors.orange.shade800,
                                   fontSize: 12)),
@@ -298,12 +315,12 @@ class _RuleDetailDialogState extends ConsumerState<_RuleDetailDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('关闭'),
+          child: Text(l10n.commonClose),
         ),
         OutlinedButton.icon(
           onPressed: () => _editContent(context, rule),
           icon: const Icon(Icons.edit, size: 16),
-          label: const Text('编辑'),
+          label: Text(l10n.commonEdit),
         ),
         OutlinedButton.icon(
           style: OutlinedButton.styleFrom(
@@ -312,15 +329,15 @@ class _RuleDetailDialogState extends ConsumerState<_RuleDetailDialog> {
             final ok = await showDialog<bool>(
               context: context,
               builder: (context) => AlertDialog(
-                title: const Text('删除规则'),
-                content: const Text('删除后不可恢复（含版本历史）。确定？'),
+                title: Text(l10n.rulesDeleteTitle),
+                content: Text(l10n.rulesDeleteContent),
                 actions: [
                   TextButton(
                       onPressed: () => Navigator.pop(context, false),
-                      child: const Text('取消')),
+                      child: Text(l10n.commonCancel)),
                   FilledButton(
                       onPressed: () => Navigator.pop(context, true),
-                      child: const Text('删除')),
+                      child: Text(l10n.commonDelete)),
                 ],
               ),
             );
@@ -330,40 +347,43 @@ class _RuleDetailDialogState extends ConsumerState<_RuleDetailDialog> {
             }
           },
           icon: const Icon(Icons.delete_outline, size: 16),
-          label: const Text('删除'),
+          label: Text(l10n.commonDelete),
         ),
       ],
     );
   }
 
   List<Widget> _sourceDetails(Rule rule) {
+    final l10n = context.l10n;
     final d = rule.source.details;
     switch (rule.source.type) {
       case RuleSourceType.emailHistory:
         final ids = (d['message_ids'] as List? ?? []).cast<String>();
         final range = d['date_range']?.toString() ?? '';
         return [
-          if (range.isNotEmpty) _kv('邮件日期范围', range),
+          if (range.isNotEmpty) _kv(l10n.rulesKvDateRange, range),
           if (ids.isNotEmpty)
-            _kv('来源邮件数', '${ids.length} 封（Message-ID 已记录在学习状态中，'
-                '不会重复学习）'),
+            _kv(l10n.rulesKvSourceMails, l10n.rulesSourceMailsDetail(ids.length)),
         ];
       case RuleSourceType.knowledgeBase:
         return [
-          _kv('文档', d['doc']?.toString() ?? ''),
-          _kv('文档版本', (d['doc_hash']?.toString() ?? '').substring(0, 12)),
+          _kv(l10n.rulesKvDoc, d['doc']?.toString() ?? ''),
+          _kv(l10n.rulesKvDocVersion, (d['doc_hash']?.toString() ?? '').substring(0, 12)),
         ];
       case RuleSourceType.userPrompt:
-        return [_kv('用户 Prompt', d['prompt_text']?.toString() ?? '')];
+        return [_kv(l10n.rulesKvUserPrompt, d['prompt_text']?.toString() ?? '')];
       case RuleSourceType.draftFeedback:
         return [
-          if (d['draft_id'] != null) _kv('来源草稿', d['draft_id'].toString()),
+          if (d['draft_id'] != null) _kv(l10n.rulesKvSourceDraft, d['draft_id'].toString()),
           if (d['change_summary'] != null)
-            _kv('修改摘要', d['change_summary'].toString()),
-          if (d['reason'] != null) _kv('优化原因', d['reason'].toString()),
+            _kv(l10n.rulesKvChangeSummary, d['change_summary'].toString()),
+          if (d['reason'] != null) _kv(l10n.rulesKvReason, d['reason'].toString()),
         ];
       case RuleSourceType.manual:
-        return [const Text('手动添加', style: TextStyle(color: Colors.grey))];
+        return [
+          Text(ruleSourceTypeLabel(l10n, RuleSourceType.manual),
+              style: const TextStyle(color: Colors.grey))
+        ];
     }
   }
 
@@ -385,11 +405,12 @@ class _RuleDetailDialogState extends ConsumerState<_RuleDetailDialog> {
       );
 
   Future<void> _editContent(BuildContext dialogContext, Rule rule) async {
+    final l10n = dialogContext.l10n;
     final controller = TextEditingController(text: rule.content);
     final ok = await showDialog<bool>(
       context: dialogContext,
       builder: (context) => AlertDialog(
-        title: const Text('编辑规则内容'),
+        title: Text(l10n.rulesEditContentTitle),
         content: TextField(
           controller: controller,
           maxLines: 4,
@@ -398,14 +419,15 @@ class _RuleDetailDialogState extends ConsumerState<_RuleDetailDialog> {
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消')),
+              child: Text(l10n.commonCancel)),
           FilledButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('保存')),
+              child: Text(l10n.commonSave)),
         ],
       ),
     );
     if (ok == true && controller.text.trim().isNotEmpty) {
+      // 变更原因与规则正文一样按中文存储（规则资产本身设计为中文）。
       await ref
           .read(rulesProvider.notifier)
           .updateContent(rule.id, controller.text.trim(), '手动编辑');

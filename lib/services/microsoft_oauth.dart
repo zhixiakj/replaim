@@ -8,6 +8,8 @@ import 'package:dio/dio.dart';
 import 'package:enough_mail/enough_mail.dart' as mail;
 import 'package:url_launcher/url_launcher.dart';
 
+import '../l10n/messages.dart';
+
 /// Microsoft（Outlook / Office 365）OAuth2 授权码 + PKCE 流程。
 ///
 /// Microsoft 已全面禁用 IMAP/SMTP 的 Basic Auth（含应用密码），必须用
@@ -89,7 +91,7 @@ class MicrosoftOAuth {
           mode: LaunchMode.externalApplication);
       if (!opened) {
         throw MicrosoftOAuthException(
-            '无法唤起系统浏览器，请手动打开此链接完成授权：\n$authorizeUrl');
+            L10nMsg('oauthBrowserFailed', [authorizeUrl.toString()]));
       }
 
       final code = await _waitForCode(server, state);
@@ -107,26 +109,26 @@ class MicrosoftOAuth {
   static Future<String> _waitForCode(HttpServer server, String state) async {
     final request =
         await server.first.timeout(_authorizeTimeout, onTimeout: () {
-      throw MicrosoftOAuthException(
-          '等待浏览器授权超时（5 分钟未完成），请重试');
+      throw const MicrosoftOAuthException(L10nMsg('oauthWaitTimeout'));
     });
     final params = request.uri.queryParameters;
     request.response.write(_callbackHtml(params.containsKey('code')));
     await request.response.close();
 
     if (params['state'] != state) {
-      throw MicrosoftOAuthException('授权回调校验失败（state 不匹配），请重试');
+      throw const MicrosoftOAuthException(L10nMsg('oauthStateMismatch'));
     }
     final error = params['error'];
     if (error != null) {
       final detail = params['error_description'] ?? '';
-      final friendly = error == 'access_denied' ? '你取消了授权' : '授权被拒绝：$error';
-      throw MicrosoftOAuthException(
-          detail.isEmpty ? friendly : '$friendly\n$detail');
+      final detailPart = detail.isEmpty ? '' : '\n$detail';
+      throw MicrosoftOAuthException(error == 'access_denied'
+          ? L10nMsg('oauthAccessDenied', [detailPart])
+          : L10nMsg('oauthRejected', [error, detailPart]));
     }
     final code = params['code'];
     if (code == null || code.isEmpty) {
-      throw MicrosoftOAuthException('授权回调缺少 code，请重试');
+      throw const MicrosoftOAuthException(L10nMsg('oauthNoCode'));
     }
     return code;
   }
@@ -190,39 +192,40 @@ class MicrosoftOAuth {
           .post<Map<String, dynamic>>(tokenEndpoint, data: form)
           .timeout(const Duration(seconds: 20));
     } on TimeoutException {
-      throw MicrosoftOAuthException(
-          '连接微软令牌服务超时（20 秒无响应）：直连可能被代理/VPN 拦截，'
-          '请检查代理软件（可尝试切换节点或全局模式）后重试');
+      throw const MicrosoftOAuthException(L10nMsg('oauthTokenTimeout'));
     } on DioException catch (e) {
       // 4xx 响应的 body 里是 error / error_description（AADSTS 详情），
       // 必须透出让用户直接看到微软拒绝的原因（如帐户类型与端点不匹配）。
       final response = e.response;
       if (response == null) {
-        throw MicrosoftOAuthException('连接微软令牌服务失败：$e');
+        throw MicrosoftOAuthException(
+            L10nMsg('oauthConnectFailed', [e.toString()]));
       }
-      final status = response.statusCode;
+      final status = (response.statusCode ?? '?').toString();
       final data = response.data;
-      String detail;
+      L10nMsg detail;
       if (data is Map && data['error'] != null) {
-        final desc = data['error_description'] ?? '';
-        detail =
-            '${data['error']}${desc.toString().isEmpty ? '' : '\n$desc'}';
+        final desc = (data['error_description'] ?? '').toString();
+        final descPart = desc.isEmpty ? '' : '\n$desc';
+        detail = L10nMsg('oauthTokenError', [data['error'].toString(), descPart]);
       } else if (data is String && data.trim().isNotEmpty) {
-        detail = data;
+        detail = L10nMsg('commonRawError', [data]);
       } else {
-        detail = e.message ?? '无响应体';
+        detail = e.message == null
+            ? const L10nMsg('oauthNoBody')
+            : L10nMsg('commonRawError', [e.message!]);
       }
-      throw MicrosoftOAuthException(
-          '微软令牌接口返回 HTTP ${status ?? '?'}：$detail');
+      throw MicrosoftOAuthException(L10nMsg('oauthHttpError', [status, detail]));
     } catch (e) {
-      throw MicrosoftOAuthException('连接微软令牌服务失败：$e');
+      throw MicrosoftOAuthException(L10nMsg('oauthConnectFailed', [e.toString()]));
     }
     final body = response.data ?? const {};
     final error = body['error'];
     if (error != null) {
-      final detail = body['error_description'] ?? '';
+      final desc = (body['error_description'] ?? '').toString();
+      final descPart = desc.isEmpty ? '' : '\n$desc';
       throw MicrosoftOAuthException(
-          '微软返回授权错误：$error${detail.toString().isEmpty ? '' : '\n$detail'}');
+          L10nMsg('oauthTokenError', [error.toString(), descPart]));
     }
     return body;
   }
@@ -232,7 +235,7 @@ class MicrosoftOAuth {
       return mail.OauthToken.fromText(jsonEncode(body),
           provider: 'microsoft');
     } catch (e) {
-      throw MicrosoftOAuthException('解析微软返回的令牌失败：$e');
+      throw MicrosoftOAuthException(L10nMsg('oauthParseFailed', [e.toString()]));
     }
   }
 
@@ -246,13 +249,9 @@ class MicrosoftOAuth {
 }
 
 /// OAuth 流程失败（用户取消 / 超时 / 微软返回错误等）。
-class MicrosoftOAuthException implements Exception {
-  MicrosoftOAuthException(this.message);
-
-  final String message;
-
-  @override
-  String toString() => message;
+/// 携带结构化消息（[L10nMsg]），UI 层经 errToMsg + resolveL10nMsg 渲染。
+class MicrosoftOAuthException extends LocalizedError {
+  const MicrosoftOAuthException(super.msg);
 }
 
 /// 把钥匙串里存的 token JSON 解析回 [mail.OauthToken]；损坏返回 null。

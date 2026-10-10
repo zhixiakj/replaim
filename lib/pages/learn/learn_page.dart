@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../l10n/date_format.dart';
+import '../../l10n/l10n_ext.dart';
+import '../../l10n/resolve_msg.dart';
 import '../../providers/app_providers.dart';
 
 /// 学习中心：历史邮件增量学习 + 已消费邮件清单。
@@ -9,6 +12,7 @@ class LearnPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
     final state = ref.watch(learnProvider);
     final space = ref.watch(currentSpaceProvider).space;
     // 学习文件夹按账号配置（各服务商命名不同），展示用去重合集
@@ -27,14 +31,14 @@ class LearnPage extends ConsumerWidget {
       children: [
         Row(
           children: [
-            Text('学习中心', style: Theme.of(context).textTheme.headlineSmall),
+            Text(l10n.navLearn, style: Theme.of(context).textTheme.headlineSmall),
             const Spacer(),
             OutlinedButton.icon(
               onPressed: state.running
                   ? null
                   : () => _confirmResetLearning(context, ref),
               icon: const Icon(Icons.restart_alt, size: 18),
-              label: const Text('重置学习记录'),
+              label: Text(l10n.learnReset),
             ),
             const SizedBox(width: 8),
             FilledButton.icon(
@@ -47,18 +51,14 @@ class LearnPage extends ConsumerWidget {
                       height: 14,
                       child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.school),
-              label: Text(state.running ? '学习中…' : '开始增量学习'),
+              label: Text(state.running ? l10n.learnRunning : l10n.learnStart),
             ),
           ],
         ),
         const SizedBox(height: 4),
         Text(
-          '从各账号「${learnFolders.join('、')}」与收件箱近 $learnMonths 个月的历史中提炼回复规则'
-          '（文件夹因服务商而异，按账号在「空间」页的邮箱账号中设置）：'
-          '学习时自动把客户来信与你的回复按线程配对，从「问了什么 → 怎么答」中学习'
-          '（空间内全部账号逐一学习）。'
-          '已学习过的邮件不会重复使用；邮件按时间升序处理、冲突时新邮件优先，'
-          '保证旧邮件不会覆盖新邮件沉淀的规则。',
+          l10n.learnIntro(
+              learnFolders.join(l10n.commonJoinSeparator), learnMonths),
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 16),
@@ -69,7 +69,9 @@ class LearnPage extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(state.progress.isEmpty ? '正在处理…' : state.progress),
+                  Text(state.progress == null
+                      ? l10n.learnProcessing
+                      : resolveL10nMsg(l10n, state.progress!)),
                   const SizedBox(height: 8),
                   if (state.total > 0)
                     LinearProgressIndicator(
@@ -83,13 +85,14 @@ class LearnPage extends ConsumerWidget {
         if (state.resultMessage != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
-            child: Text(state.resultMessage!,
+            child: Text(resolveL10nMsg(l10n, state.resultMessage!),
                 style: const TextStyle(color: Colors.green)),
           ),
         if (state.error != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
-            child: Text(state.error!, style: const TextStyle(color: Colors.red)),
+            child: Text(resolveL10nMsg(l10n, state.error!),
+                style: const TextStyle(color: Colors.red)),
           ),
         if (state.failedFolders.isNotEmpty)
           Card(
@@ -105,7 +108,7 @@ class LearnPage extends ConsumerWidget {
                       Icon(Icons.warning_amber_rounded,
                           size: 18, color: Colors.orange.shade800),
                       const SizedBox(width: 6),
-                      Text('部分学习文件夹拉取失败',
+                      Text(l10n.learnFailedFoldersTitle,
                           style: TextStyle(
                               fontWeight: FontWeight.bold,
                               color: Colors.orange.shade900)),
@@ -118,12 +121,9 @@ class LearnPage extends ConsumerWidget {
                       child: Text(f, style: const TextStyle(fontSize: 13)),
                     ),
                   const SizedBox(height: 4),
-                  const Text(
-                    '请在「空间」页 → 邮箱账号 → 编辑该账号 → 历史学习文件夹 中改用'
-                    '服务器实际存在的文件夹名，或点「从服务器读取文件夹列表」直接选择；'
-                    '常用已发送命名（Sent / Sent Messages / Sent Items / 已发送）'
-                    '会自动匹配，全部未命中时学习会按服务器 \\Sent 标记自动识别。',
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  Text(
+                    l10n.learnFailedFoldersHint,
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ],
               ),
@@ -135,16 +135,20 @@ class LearnPage extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('学习状态', style: Theme.of(context).textTheme.titleMedium),
+                Text(l10n.learnStatusSection,
+                    style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
-                Text('已消费邮件：${consumed.length} 封'),
-                Text('上次学习：${state.lastRunAt?.toIso8601String().substring(0, 19) ?? "从未"}'),
+                Text(l10n.learnConsumedCount(consumed.length)),
+                Text(state.lastRunAt == null
+                    ? l10n.learnNever
+                    : l10n.learnLastRun(
+                        formatDateTimeShort(context, state.lastRunAt!))),
                 const SizedBox(height: 12),
                 if (consumed.isEmpty)
-                  const Text('还没有学习记录。点击「开始增量学习」从历史邮件中提炼规则。',
-                      style: TextStyle(color: Colors.grey))
+                  Text(l10n.learnNoRecords,
+                      style: const TextStyle(color: Colors.grey))
                 else ...[
-                  Text('最近消费的邮件（最多显示 200 封）',
+                  Text(l10n.learnRecentSection,
                       style: Theme.of(context).textTheme.titleSmall),
                   const SizedBox(height: 4),
                   for (final c in recent.reversed.take(50))
@@ -154,13 +158,13 @@ class LearnPage extends ConsumerWidget {
                       leading: const Icon(Icons.mark_email_read_outlined,
                           size: 18, color: Colors.grey),
                       title: Text(
-                        c.subject.isEmpty ? '（无主题）' : c.subject,
+                        c.subject.isEmpty ? l10n.learnNoSubject : c.subject,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                       subtitle: Text(
                         '${c.folder} · ${c.date.substring(0, 10)} · '
-                        '产出规则 ${c.generatedRuleIds.length} 条',
+                        '${l10n.learnGeneratedRules(c.generatedRuleIds.length)}',
                         maxLines: 1,
                       ),
                     ),
@@ -177,20 +181,20 @@ class LearnPage extends ConsumerWidget {
 /// 重置学习记录：确认后清空「已消费邮件」（不动已生成的规则），
 /// 下次学习会重新读取全部历史邮件。
 Future<void> _confirmResetLearning(BuildContext context, WidgetRef ref) async {
+  final l10n = context.l10n;
   final ok = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
-      title: const Text('重置学习记录'),
-      content: const Text(
-          '将清空「已消费邮件」记录，不影响已生成的规则。下次「开始增量学习」会重新读取全部历史邮件。确定？'),
+      title: Text(l10n.learnResetTitle),
+      content: Text(l10n.learnResetContent),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context, false),
-          child: const Text('取消'),
+          child: Text(l10n.commonCancel),
         ),
         FilledButton(
           onPressed: () => Navigator.pop(context, true),
-          child: const Text('重置'),
+          child: Text(l10n.learnResetConfirm),
         ),
       ],
     ),

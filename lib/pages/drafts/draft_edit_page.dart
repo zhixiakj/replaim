@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../l10n/l10n_ext.dart';
+import '../../l10n/model_labels.dart';
+import '../../l10n/resolve_msg.dart';
 import '../../models/draft_record.dart';
 import '../../providers/app_providers.dart';
 import 'draft_actions.dart';
@@ -80,12 +83,13 @@ class _DraftEditPageState extends ConsumerState<DraftEditPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final record = _record;
     if (!_loaded) {
       return const Center(child: CircularProgressIndicator());
     }
     if (record == null) {
-      return const Center(child: Text('草稿不存在'));
+      return Center(child: Text(l10n.draftNotFound));
     }
     final rules = ref.watch(rulesProvider).rules;
     final usedRules =
@@ -99,16 +103,16 @@ class _DraftEditPageState extends ConsumerState<DraftEditPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('回复：${record.subject}'),
+        title: Text(l10n.inboxReplySubject(record.subject)),
         actions: [
           if (editable) ...[
             TextButton(
               onPressed: _sending ? null : _delete,
-              child: const Text('删除'),
+              child: Text(l10n.commonDelete),
             ),
             TextButton(
               onPressed: _sending ? null : _markManuallySent,
-              child: const Text('标注已发送'),
+              child: Text(l10n.inboxMarkSent),
             ),
             const SizedBox(width: 8),
             FilledButton.icon(
@@ -119,7 +123,7 @@ class _DraftEditPageState extends ConsumerState<DraftEditPage> {
                       height: 14,
                       child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.send),
-              label: Text(_sending ? '发送中…' : '确认发送'),
+              label: Text(_sending ? l10n.commonSending : l10n.draftConfirmSendTitle),
             ),
             const SizedBox(width: 12),
           ],
@@ -145,32 +149,34 @@ class _DraftEditPageState extends ConsumerState<DraftEditPage> {
                           Icon(Icons.info_outline,
                               size: 18, color: Colors.orange.shade800),
                           const SizedBox(width: 8),
-                          const Expanded(
+                          Expanded(
                             child: Text(
-                              '未发送的草稿不会计入后续草稿生成与学习；'
-                              '发送或标注已发送后，内容才会作为参考。',
-                              style: TextStyle(height: 1.4),
+                              l10n.draftUnsentNote,
+                              style: const TextStyle(height: 1.4),
                             ),
                           ),
                         ],
                       ),
                     ),
                   ),
-                Text('收件人：${record.toAddress}',
+                Text(l10n.draftToLine(record.toAddress),
                     style: Theme.of(context).textTheme.bodyMedium),
                 Text(
-                  '发信账号：${sender?.email ?? "（空间内无可用发信账号）"}'
-                  '${sender != null && sender.id != record.accountId ? "（收信账号未开发信，使用默认发信账号）" : ""}',
+                  sender == null
+                      ? l10n.draftSenderMissing
+                      : l10n.draftSenderLine(sender.email) +
+                          (sender.id != record.accountId
+                              ? l10n.draftSenderFallbackNote
+                              : ''),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
-                Text('生成模型：${record.llmGeneratedBy}',
+                Text(l10n.draftGeneratedByLine(record.llmGeneratedBy),
                     style: Theme.of(context).textTheme.bodySmall),
                 const SizedBox(height: 4),
                 Text(
                   sent
-                      ? '状态：${record.status.label}'
-                      : '草稿由回复规则生成，可直接编辑或用右侧 AI 对话修改；'
-                          '发送时会对比修改并自动优化规则。',
+                      ? l10n.draftStatusLine(draftStatusLabel(l10n, record.status))
+                      : l10n.draftEditHint,
                   style: TextStyle(
                     color: sent ? Colors.green : Colors.orange.shade800,
                   ),
@@ -191,7 +197,7 @@ class _DraftEditPageState extends ConsumerState<DraftEditPage> {
                 ),
                 if (editable) ...[
                   const SizedBox(height: 12),
-                  Text('抄送（转发场景自动识别的原始收件地址，可增删）',
+                  Text(l10n.draftCcLabel,
                       style: Theme.of(context).textTheme.bodySmall),
                   const SizedBox(height: 4),
                   Wrap(
@@ -212,16 +218,16 @@ class _DraftEditPageState extends ConsumerState<DraftEditPage> {
                       Expanded(
                         child: TextField(
                           controller: _ccInput,
-                          decoration: const InputDecoration(
-                            hintText: '添加抄送地址',
-                            border: OutlineInputBorder(),
+                          decoration: InputDecoration(
+                            hintText: l10n.draftAddCcHint,
+                            border: const OutlineInputBorder(),
                             isDense: true,
                           ),
                           onSubmitted: (_) => _addCc(record),
                         ),
                       ),
                       IconButton(
-                        tooltip: '添加',
+                        tooltip: l10n.commonAdd,
                         icon: const Icon(Icons.add),
                         onPressed: () => _addCc(record),
                       ),
@@ -230,8 +236,9 @@ class _DraftEditPageState extends ConsumerState<DraftEditPage> {
                 ],
                 const SizedBox(height: 20),
                 ExpansionTile(
-                  title: Text('本草稿依据的回复规则（${usedRules.length} 条）'),
-                  subtitle: Text('草稿只依据规则生成，规则未覆盖的内容不会编造', style: Theme.of(context).textTheme.bodySmall,),
+                  title: Text(l10n.draftUsedRulesTitle(usedRules.length)),
+                  subtitle: Text(l10n.draftUsedRulesSubtitle,
+                      style: Theme.of(context).textTheme.bodySmall),
                   children: [
                     for (final r in usedRules)
                       ListTile(
@@ -242,8 +249,9 @@ class _DraftEditPageState extends ConsumerState<DraftEditPage> {
                           color: r.enabled ? Colors.green : Colors.grey,
                         ),
                         title: Text(r.content),
-                        subtitle: Text(
-                            '${r.category.label} · 来源：${r.source.type.label}'),
+                        subtitle: Text(l10n.draftRuleSourceLine(
+                            ruleCategoryLabel(l10n, r.category),
+                            ruleSourceTypeLabel(l10n, r.source.type))),
                       ),
                   ],
                 ),
@@ -255,7 +263,7 @@ class _DraftEditPageState extends ConsumerState<DraftEditPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('发送后规则优化记录',
+                          Text(l10n.draftRuleUpdatesTitle,
                               style: Theme.of(context).textTheme.titleSmall),
                           for (final u in record.ruleUpdates)
                             Text('· [${u.action}] ${u.summary}'),
@@ -304,14 +312,18 @@ class _DraftEditPageState extends ConsumerState<DraftEditPage> {
         await ref.read(draftsProvider.notifier).send(record, text);
     if (!mounted) return;
     setState(() => _sending = false);
-    final feedback = ref.read(draftsProvider).feedbackMessage;
+    final state = ref.read(draftsProvider);
     if (success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(feedback ?? '已发送')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(state.feedbackMessage == null
+              ? context.l10n.inboxSentFallback
+              : resolveL10nMsg(context.l10n, state.feedbackMessage!))));
       await _refreshRecord();
     } else {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(ref.read(draftsProvider).error ?? '发送失败')));
+          content: Text(state.error == null
+              ? context.l10n.inboxSendFailed
+              : resolveL10nMsg(context.l10n, state.error!))));
     }
   }
 
@@ -327,9 +339,11 @@ class _DraftEditPageState extends ConsumerState<DraftEditPage> {
         runFeedback: confirmed.runFeedback);
     if (!mounted) return;
     if (success) {
+      final feedback = ref.read(draftsProvider).feedbackMessage;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(
-              ref.read(draftsProvider).feedbackMessage ?? '已标注为已发送')));
+          content: Text(feedback == null
+              ? context.l10n.inboxMarkedSentFallback
+              : resolveL10nMsg(context.l10n, feedback))));
       await _refreshRecord();
     }
   }

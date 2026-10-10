@@ -1,4 +1,5 @@
 
+import '../l10n/messages.dart';
 import '../models/email_summary.dart';
 import '../models/rule.dart';
 import 'app_log.dart';
@@ -59,8 +60,8 @@ class RuleGenerators {
   /// 每批邮件材料的字符预算（约等于 4~6k token，留足输出空间）。
   static const _emailBatchChars = 10000;
 
-  /// 学习进度回调。
-  void Function(String stage, int done, int total)? onProgress;
+  /// 学习进度回调（stage 为结构化消息，UI 层按 locale 渲染）。
+  void Function(L10nMsg stage, int done, int total)? onProgress;
 
   /// 1) 历史邮件 → 规则（增量）。
   ///
@@ -80,8 +81,10 @@ class RuleGenerators {
 
     for (var i = 0; i < batches.length; i++) {
       final batch = batches[i];
-      onProgress?.call('正在分析第 ${i + 1}/${batches.length} 批往来邮件',
-          i + 1, batches.length);
+      onProgress?.call(
+          L10nMsg('learnStageAnalyzing', [i + 1, batches.length]),
+          i + 1,
+          batches.length);
       final dateRange = _dateRangeText(batch);
       var incomingCount = 0;
       for (final e in batch) {
@@ -121,7 +124,9 @@ class RuleGenerators {
 
       // 与现有规则库合并（冲突时新规则胜出）。
       onProgress?.call(
-          '正在合并规则（第 ${i + 1}/${batches.length} 批）', i + 1, batches.length);
+          L10nMsg('learnStageMerging', [i + 1, batches.length]),
+          i + 1,
+          batches.length);
       final merged = await mergeBatch(batchRules);
       AppLog.log('learn', '批次 ${i + 1}/${batches.length}：合并后新增 '
           '${merged.added.length} 条、更新 ${merged.updatedRuleIds.length} 条');
@@ -221,7 +226,7 @@ class RuleGenerators {
     final rules = <Rule>[];
     for (var i = 0; i < chunks.length; i++) {
       onProgress?.call(
-          '正在从《$docName》提取规则（片段 ${i + 1}/${chunks.length}）',
+          L10nMsg('kbStageExtracting', [docName, i + 1, chunks.length]),
           i + 1,
           chunks.length);
       final raw = await llm.chatJson([
@@ -348,7 +353,7 @@ class RuleGenerators {
         }
       }
       if (list == null) {
-        throw const FormatException('模型输出对象中不含规则数组');
+        throw const LocalizedError(L10nMsg('learnErrNoRulesArray'));
       }
       items = list
           .whereType<Map>()
@@ -357,7 +362,8 @@ class RuleGenerators {
     } else if (raw is String) {
       items = extractJsonList(raw);
     } else {
-      throw FormatException('模型输出不是规则数组（${raw.runtimeType}）');
+      throw LocalizedError(
+          L10nMsg('learnErrNotRulesArray', [raw.runtimeType.toString()]));
     }
     for (final item in items) {
       final content = readStr(item, ['content', 'rule', 'text']);

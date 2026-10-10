@@ -58,6 +58,26 @@ class SpaceStore {
   }
 
   Future<void> saveCurrentSpaceId(String? spaceId) async {
-    await writeYamlFile(_appStateFile, {'current_space_id': spaceId ?? ''});
+    await _mergeAppState({'current_space_id': spaceId ?? ''});
+  }
+
+  // ---------------- 界面语言 ----------------
+
+  /// 界面语言：null = 跟随系统（app_state.yaml 无 language 键或值非法）。
+  Future<String?> loadLanguage() async {
+    final lang = readYamlMap(_appStateFile)?['language'] as String?;
+    return (lang == 'zh' || lang == 'en') ? lang : null;
+  }
+
+  Future<void> saveLanguage(String? language) async {
+    await _mergeAppState({'language': language ?? ''});
+  }
+
+  /// app_state.yaml 由多个全局键共享（current_space_id / language 等），
+  /// 必须读-合并-写，禁止整 map 覆盖。
+  Future<void> _mergeAppState(Map<String, Object?> changes) async {
+    final merged = readYamlMap(_appStateFile) ?? <String, dynamic>{};
+    merged.addAll(changes);
+    await writeYamlFile(_appStateFile, merged);
   }
 }

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../l10n/l10n_ext.dart';
+import '../../l10n/messages.dart';
+import '../../l10n/resolve_msg.dart';
 import '../../models/draft_record.dart';
 import '../../providers/app_providers.dart';
 
@@ -59,7 +62,10 @@ class _DraftChatPanelState extends ConsumerState<DraftChatPanel> {
       _input.clear();
       widget.onApplied(result.body);
     } catch (e) {
-      if (mounted) setState(() => _error = '修改失败：$e');
+      if (mounted) {
+        setState(() => _error = context.l10n
+            .chatRefineFailed(resolveL10nMsg(context.l10n, errToMsg(e))));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -85,6 +91,7 @@ class _DraftChatPanelState extends ConsumerState<DraftChatPanel> {
     final record = _recordOf(ref.watch(draftsProvider));
     final messages = record?.chatHistory ?? const <DraftChatMessage>[];
     final scheme = Theme.of(context).colorScheme;
+    final l10n = context.l10n;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -99,13 +106,13 @@ class _DraftChatPanelState extends ConsumerState<DraftChatPanel> {
                   Icon(Icons.auto_awesome,
                       size: 18, color: scheme.primary),
                   const SizedBox(width: 6),
-                  Text('AI 改稿',
+                  Text(l10n.chatTitle,
                       style: Theme.of(context).textTheme.titleMedium),
                 ],
               ),
               const SizedBox(height: 2),
               Text(
-                '告诉 AI 怎么改，修改后的正文会自动更新到左侧',
+                l10n.chatSubtitle,
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
@@ -119,8 +126,8 @@ class _DraftChatPanelState extends ConsumerState<DraftChatPanel> {
                     padding: const EdgeInsets.all(24),
                     child: Text(
                       widget.enabled
-                          ? '和 AI 对话来修改草稿，例如：\n「语气更诚恳一点」「开头加上感谢反馈」「去掉具体天数承诺」'
-                          : '草稿已定稿，对话已停用',
+                          ? l10n.chatEmptyActive
+                          : l10n.chatEmptyLocked,
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
@@ -166,10 +173,10 @@ class _DraftChatPanelState extends ConsumerState<DraftChatPanel> {
                   enabled: widget.enabled && !_busy,
                   minLines: 1,
                   maxLines: 4,
-                  decoration: const InputDecoration(
-                    hintText: '告诉 AI 怎么修改草稿…',
+                  decoration: InputDecoration(
+                    hintText: l10n.chatInputHint,
                     isDense: true,
-                    border: OutlineInputBorder(),
+                    border: const OutlineInputBorder(),
                   ),
                   onSubmitted: (_) => _send(),
                 ),
@@ -185,7 +192,7 @@ class _DraftChatPanelState extends ConsumerState<DraftChatPanel> {
                             CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.send),
-                label: const Text('修改'),
+                label: Text(l10n.chatSendButton),
               ),
             ],
           ),
@@ -271,7 +278,9 @@ class _AssistantBubbleState extends State<_AssistantBubble> {
                       color: scheme.primary,
                     ),
                     Text(
-                      _expanded ? '收起正文' : '正文已更新，点击查看',
+                      _expanded
+                          ? context.l10n.chatCollapseBody
+                          : context.l10n.chatExpandBody,
                       style: TextStyle(
                         fontSize: 12,
                         color: scheme.primary,
@@ -323,7 +332,7 @@ class _BusyBubble extends StatelessWidget {
             child: CircularProgressIndicator(strokeWidth: 2),
           ),
           const SizedBox(width: 8),
-          Text('AI 正在修改草稿…',
+          Text(context.l10n.chatBusy,
               style: Theme.of(context).textTheme.bodySmall),
         ],
       ),

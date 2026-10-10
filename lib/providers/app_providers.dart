@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:enough_mail/enough_mail.dart' as mail;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../l10n/messages.dart';
 import '../models/app_config.dart';
 import '../models/conversation.dart';
 import '../models/draft_record.dart';
@@ -405,18 +406,19 @@ final llmClientProvider = Provider<LlmClient?>((ref) {
 
 /// llmClientProvider 为 null 时的具体原因，供错误提示区分场景。
 /// watch 与 llmClientProvider 相同的源，点击时两者读到的是同一份状态。
-final llmUnavailableReasonProvider = Provider<String>((ref) {
+/// 返回结构化消息（L10nMsg），UI 层经 resolveL10nMsg 渲染。
+final llmUnavailableReasonProvider = Provider<L10nMsg>((ref) {
   final spaces = ref.watch(spacesProvider);
   final profiles = ref.watch(llmProfilesProvider);
   final hasConfigured = profiles.profiles.any((p) => p.config.isConfigured);
-  if (!hasConfigured) return '请先在设置中配置大模型，并在空间中分配';
+  if (!hasConfigured) return const L10nMsg('llmReasonNoneConfigured');
   final space = spaces.byId(ref.watch(spaceSelectionProvider));
   if (space == null || space.llmProfileId == null) {
-    return '设置中已配置大模型，请在「空间」页为当前空间分配大模型';
+    return const L10nMsg('llmReasonNotAssigned');
   }
   final profile = profiles.byId(space.llmProfileId);
-  if (profile == null) return '当前空间分配的大模型已被删除，请在「空间」页重新分配';
-  return '当前空间分配的大模型配置不完整（缺接口地址或模型名），请在「设置」页完善';
+  if (profile == null) return const L10nMsg('llmReasonDeleted');
+  return const L10nMsg('llmReasonIncomplete');
 });
 
 /// ------------------------------------------------------------------
@@ -492,7 +494,7 @@ final rulesProvider =
 class LearnRunState {
   const LearnRunState({
     this.running = false,
-    this.progress = '',
+    this.progress,
     this.done = 0,
     this.total = 0,
     this.error,
@@ -503,18 +505,20 @@ class LearnRunState {
   });
 
   final bool running;
-  final String progress;
+
+  /// 进度行文案（结构化，null = 未开始）。
+  final L10nMsg? progress;
   final int done;
   final int total;
-  final String? error;
-  final String? resultMessage;
+  final L10nMsg? error;
+  final L10nMsg? resultMessage;
 
   /// 已消费邮件总数（learn_state 统计）。
   final int consumedCount;
   final DateTime? lastRunAt;
 
   /// 本次运行中拉取失败的账号/文件夹及完整原因（含服务器现有文件夹列表，
-  /// 供用户对照修改学习文件夹配置）。
+  /// 供用户对照修改学习文件夹配置）。技术细节原文，不本地化。
   final List<String> failedFolders;
 }
 
@@ -574,7 +578,7 @@ class LearnController extends Notifier<LearnRunState> {
       _set(LearnRunState(
           consumedCount: state.consumedCount,
           lastRunAt: state.lastRunAt,
-          error: '请先在「空间」页创建空间并配置邮箱账号'));
+          error: const L10nMsg('learnErrNeedSpace')));
       return;
     }
     // 冷启动竞态防护：等钥匙串凭证读入内存，再筛选可用账号。
@@ -591,13 +595,13 @@ class LearnController extends Notifier<LearnRunState> {
       _set(LearnRunState(
           consumedCount: state.consumedCount,
           lastRunAt: state.lastRunAt,
-          error: '空间内的邮箱账号均未配置完整（缺服务器或密码）'));
+          error: const L10nMsg('learnErrIncomplete')));
       return;
     }
 
     _set(LearnRunState(
         running: true,
-        progress: '正在拉取历史邮件…',
+        progress: const L10nMsg('learnFetchingHistory'),
         consumedCount: state.consumedCount,
         lastRunAt: state.lastRunAt));
     final failed = <String>[];
@@ -606,7 +610,7 @@ class LearnController extends Notifier<LearnRunState> {
       final since =
           DateTime.now().subtract(Duration(days: 30 * space.learnMonths));
       final all = <EmailSummary>[];
-      final recoveredNotes = <String>[];
+      var recoveredCount = 0;
       for (final account in usable) {
         final mail = secretsNotifier.buildMailService(account);
         // 发件侧（账号级 learnFolders，文件夹名因服务商而异）：既是学习
@@ -618,8 +622,8 @@ class LearnController extends Notifier<LearnRunState> {
         for (final folder in account.learnFolders) {
           _set(LearnRunState(
               running: true,
-              progress:
-                  '正在拉取 ${account.email} 的 $folder（近 ${space.learnMonths} 个月）…',
+              progress: L10nMsg('learnFetchingFolder',
+                  [account.email, folder, space.learnMonths]),
               consumedCount: learnState.consumed.length,
               lastRunAt: learnState.lastRunAt));
           try {
@@ -641,7 +645,8 @@ class LearnController extends Notifier<LearnRunState> {
           if (detected != null) {
             _set(LearnRunState(
                 running: true,
-                progress: '正在拉取 ${account.email} 的 $detected（自动识别）…',
+                progress: L10nMsg('learnFetchingDetected',
+                    [account.email, detected]),
                 consumedCount: learnState.consumed.length,
                 lastRunAt: learnState.lastRunAt));
             try {
@@ -649,8 +654,9 @@ class LearnController extends Notifier<LearnRunState> {
                   folder: detected,
                   limit: space.learnMaxPerFolder,
                   accountId: account.id));
-              recoveredNotes.add('${account.email}：学习文件夹自动识别为'
-                  '「$detected」并已更新配置');
+              recoveredCount++;
+              AppLog.log('learn',
+                  '${account.email}：学习文件夹自动识别为「$detected」并已更新配置');
               accountFailed.clear();
               accountFailedDetails.clear();
             } catch (e) {
@@ -664,7 +670,7 @@ class LearnController extends Notifier<LearnRunState> {
         // 收件侧：拉收件箱，只保留与发件同线程的来信（问→答配对学习）。
         _set(LearnRunState(
             running: true,
-            progress: '正在拉取 ${account.email} 的 INBOX（配对客户来信）…',
+            progress: L10nMsg('learnFetchingInbox', [account.email]),
             consumedCount: learnState.consumed.length,
             lastRunAt: learnState.lastRunAt));
         List<EmailSummary> accountInbox = const [];
@@ -705,18 +711,18 @@ class LearnController extends Notifier<LearnRunState> {
       }
 
       final failedNote = failed.isEmpty
-          ? ''
-          : '；${failed.length} 个账号/文件夹拉取失败（详见下方警告）';
-      final recoveredNote =
-          recoveredNotes.isEmpty ? '' : '；${recoveredNotes.join('；')}';
+          ? const L10nMsg('commonEmpty')
+          : L10nMsg('learnFailedNote', [failed.length]);
+      final recoveredNote = recoveredCount == 0
+          ? const L10nMsg('commonEmpty')
+          : L10nMsg('learnRecoveredNote', [recoveredCount]);
 
       if (all.isEmpty) {
         _set(LearnRunState(
             consumedCount: learnState.consumed.length,
             lastRunAt: learnState.lastRunAt,
             failedFolders: failedDetails,
-            resultMessage:
-                '没有新的可学习邮件（均已消费过或超出时间范围）$failedNote$recoveredNote'));
+            resultMessage: L10nMsg('learnNoNewEmails', [failedNote, recoveredNote])));
         return;
       }
 
@@ -761,16 +767,20 @@ class LearnController extends Notifier<LearnRunState> {
         consumedCount: learnState.consumed.length,
         lastRunAt: learnState.lastRunAt,
         failedFolders: failedDetails,
-        resultMessage: '学习完成：新增 ${result.addedRules.length} 条规则，'
-            '更新 ${result.updatedRuleIds.toSet().length} 条，消费 ${consumed.length} 封邮件'
-            '$failedNote$recoveredNote',
+        resultMessage: L10nMsg('learnDone', [
+          result.addedRules.length,
+          result.updatedRuleIds.toSet().length,
+          consumed.length,
+          failedNote,
+          recoveredNote,
+        ]),
       ));
     } catch (e) {
       _set(LearnRunState(
           consumedCount: learnState.consumed.length,
           lastRunAt: learnState.lastRunAt,
           failedFolders: failedDetails,
-          error: '学习失败：$e'));
+          error: L10nMsg('learnErrFailed', [errToMsg(e)])));
     }
   }
 
@@ -800,14 +810,14 @@ class KbState {
     this.busy = false,
     this.message,
     this.error,
-    this.progress = '',
+    this.progress,
   });
 
   final List<KbDoc> docs;
   final bool busy;
-  final String? message;
-  final String? error;
-  final String progress;
+  final L10nMsg? message;
+  final L10nMsg? error;
+  final L10nMsg? progress;
 }
 
 class KbController extends Notifier<KbState> {
@@ -826,12 +836,12 @@ class KbController extends Notifier<KbState> {
   }
 
   Future<void> import(List<String> paths) async {
-    state = _copy(progress: '正在导入文档…', busy: true);
+    state = _copy(progress: const L10nMsg('kbImporting'), busy: true);
     try {
       final docs = await _service.importFiles(paths);
-      state = KbState(docs: docs, message: '导入完成，共 ${docs.length} 个文档');
+      state = KbState(docs: docs, message: L10nMsg('kbImported', [docs.length]));
     } catch (e) {
-      state = _copy(error: '导入失败：$e');
+      state = _copy(error: L10nMsg('kbImportFailed', [errToMsg(e)]));
     }
   }
 
@@ -840,7 +850,11 @@ class KbController extends Notifier<KbState> {
     state = KbState(docs: docs);
   }
 
-  KbState _copy({String? progress, bool? busy, String? message, String? error}) =>
+  KbState _copy(
+      {L10nMsg? progress,
+      bool? busy,
+      L10nMsg? message,
+      L10nMsg? error}) =>
       KbState(
         docs: state.docs,
         busy: busy ?? state.busy,
@@ -860,7 +874,7 @@ class KbController extends Notifier<KbState> {
     final docs = await _service.loadIndex();
     final targets = docs.where((d) => d.needsRuleGeneration).toList();
 
-    state = _copy(busy: true, progress: '准备生成规则…');
+    state = _copy(busy: true, progress: const L10nMsg('kbPreparing'));
     final generator = RuleGenerators(
         llm: llm, store: ref.read(rulesProvider.notifier).store)
       ..onProgress = (stage, _, _) {
@@ -885,12 +899,12 @@ class KbController extends Notifier<KbState> {
       state = KbState(
         docs: latest,
         message: targets.isEmpty
-            ? '没有需要生成规则的文档'
-            : '已为 ${targets.length} 个文档生成 $totalRules 条规则',
+            ? const L10nMsg('kbNoDocs')
+            : L10nMsg('kbGenerated', [targets.length, totalRules]),
       );
     } catch (e) {
       final latest = await _service.loadIndex();
-      state = KbState(docs: latest, error: '生成失败：$e');
+      state = KbState(docs: latest, error: L10nMsg('kbGenerateFailed', [errToMsg(e)]));
     }
   }
 
@@ -913,7 +927,7 @@ class InboxState {
     this.conversations = const [],
     this.loading = false,
     this.syncingLabel,
-    this.error,
+    this.errors = const [],
     this.selectedKey,
     this.selectedMessage,
     this.refreshed = false,
@@ -928,10 +942,11 @@ class InboxState {
   final bool loading;
 
   /// loading 期间正在同步的账号 × 文件夹（界面进度行；卡住时不用控制台
-  /// 就能看到停在哪一步）。
-  final String? syncingLabel;
+  /// 就能看到停在哪一步）。结构化消息，UI 层按 locale 渲染。
+  final L10nMsg? syncingLabel;
 
-  final String? error;
+  /// 同步过程中的错误列表（结构化，空 = 无错）。
+  final List<L10nMsg> errors;
 
   /// 选中会话的规范键（参与人集合键）。
   final String? selectedKey;
@@ -986,23 +1001,25 @@ class InboxController extends Notifier<InboxState> {
     final space = ref.read(currentSpaceProvider).space;
     if (space == null || space.accounts.isEmpty) {
       _setDerived(const [],
-          error: '请先在「空间」页创建空间并配置邮箱账号', refreshed: true);
+          errors: const [L10nMsg('inboxErrNoSpace')], refreshed: true);
       return;
     }
     final receivers = space.receiveAccounts;
     if (receivers.isEmpty) {
       _setDerived(state.messages,
-          error: '当前空间没有开启收信的账号', refreshed: true);
+          errors: const [L10nMsg('inboxErrNoReceiver')], refreshed: true);
       return;
     }
     // 冷启动竞态防护：等钥匙串凭证读入内存，再判断配置完整性。
     await ref.read(secretsProvider.notifier).ready;
     _setDerived(state.messages,
-        loading: true, refreshed: true, syncingLabel: '准备同步…');
+        loading: true,
+        refreshed: true,
+        syncingLabel: const L10nMsg('inboxPreparing'));
     final addresses = space.accountAddresses;
     final store = InboxCacheStore(spaceId: space.id);
     final all = <EmailSummary>[];
-    final errors = <String>[];
+    final errors = <L10nMsg>[];
     final sw = Stopwatch()..start();
     try {
       for (final account in receivers) {
@@ -1011,11 +1028,11 @@ class InboxController extends Notifier<InboxState> {
             ref.read(secretsProvider.notifier).buildMailService(account);
         if (!mail.isReceiveReady) {
           final reason = !account.isReceiveConfigured
-              ? '缺 IMAP 服务器配置'
+              ? const L10nMsg('inboxReasonNoImap')
               : (account.authType == kAuthTypeOauth
-                  ? '尚未完成 Microsoft 授权（在账号设置里重新登录）'
-                  : '缺密码（钥匙串未返回该账号的授权码）');
-          errors.add('${account.email}：配置不完整（$reason）');
+                  ? const L10nMsg('inboxReasonOauth')
+                  : const L10nMsg('inboxReasonNoPassword'));
+          errors.add(L10nMsg('inboxErrIncomplete', [account.email, reason]));
           continue;
         }
         InboxCacheEntry? cached;
@@ -1042,7 +1059,7 @@ class InboxController extends Notifier<InboxState> {
           _setDerived(state.messages,
               loading: true,
               refreshed: true,
-              syncingLabel: '正在同步 ${account.email} $role…');
+              syncingLabel: L10nMsg('inboxSyncing', [account.email, role]));
           try {
             final result = await mail.fetchIncremental(
               folder: role,
@@ -1068,7 +1085,7 @@ class InboxController extends Notifier<InboxState> {
           } on FolderNotFoundException {
             // 服务器没有已发送文件夹（少见）：提示并跳过，不影响收件。
             if (isSent) {
-              errors.add('${account.email}：未找到已发送文件夹，已跳过');
+              errors.add(L10nMsg('inboxErrSentMissing', [account.email]));
               accountMessages.addAll(cachedFolderMessages);
             }
           } catch (e) {
@@ -1076,9 +1093,11 @@ class InboxController extends Notifier<InboxState> {
             // 同步失败但缓存有数据：保留缓存展示，离线不清空列表。
             if (cachedFolderMessages.isNotEmpty) {
               accountMessages.addAll(cachedFolderMessages);
-              errors.add('${account.email} $role：同步失败（展示缓存）：$e');
+              errors.add(L10nMsg('inboxErrSyncFailedCached',
+                  [account.email, role, errToMsg(e)]));
             } else {
-              errors.add('${account.email} $role：$e');
+              errors.add(
+                  L10nMsg('inboxErrSyncFailed', [account.email, role, errToMsg(e)]));
             }
           }
         }
@@ -1106,13 +1125,12 @@ class InboxController extends Notifier<InboxState> {
     } catch (e) {
       // 兜底：循环内各步已有局部捕获，这里接住漏网异常
       // （如底层库抛出的意外类型），保证 loading 一定能清除。
-      errors.add('刷新中断：$e');
+      errors.add(L10nMsg('inboxErrInterrupted', [errToMsg(e)]));
     } finally {
       AppLog.log('inbox', '刷新完成：${all.length} 封'
           '${errors.isEmpty ? '' : '，${errors.length} 条错误'}'
           '（${sw.elapsedMilliseconds}ms）');
-      _setDerived(all,
-          error: errors.isEmpty ? null : errors.join('；'), refreshed: true);
+      _setDerived(all, errors: errors, refreshed: true);
     }
   }
 
@@ -1194,8 +1212,8 @@ class InboxController extends Notifier<InboxState> {
   void _setDerived(
     List<EmailSummary> messages, {
     bool loading = false,
-    String? syncingLabel,
-    String? error,
+    L10nMsg? syncingLabel,
+    List<L10nMsg> errors = const [],
     bool? refreshed,
     String? selectedKey,
     bool conversationSwitched = false,
@@ -1235,7 +1253,7 @@ class InboxController extends Notifier<InboxState> {
         conversations: conversations,
         loading: loading,
         syncingLabel: syncingLabel,
-        error: error,
+        errors: errors,
         selectedKey: selectedKey,
         selectedMessage: selectedKey == null ? null : selectedMessage,
         refreshed: refreshed ?? state.refreshed,
@@ -1266,9 +1284,9 @@ class DraftsState {
 
   final List<DraftRecord> records;
   final bool generating;
-  final String? error;
-  final String? message;
-  final String? feedbackMessage;
+  final L10nMsg? error;
+  final L10nMsg? message;
+  final L10nMsg? feedbackMessage;
 }
 
 class DraftsController extends Notifier<DraftsState> {
@@ -1303,12 +1321,12 @@ class DraftsController extends Notifier<DraftsState> {
     }
     final space = ref.read(currentSpaceProvider).space;
     if (space == null) {
-      state = _copy(error: '请先创建空间');
+      state = _copy(error: const L10nMsg('draftsErrNeedSpace'));
       return null;
     }
     final existing = await _store.findEditingByEmail(email.messageId);
     if (existing != null) {
-      state = _copy(message: '这封邮件已有进行中的草稿，已为你打开');
+      state = _copy(message: const L10nMsg('draftsMsgExisting'));
       return existing.id;
     }
 
@@ -1322,8 +1340,8 @@ class DraftsController extends Notifier<DraftsState> {
     if (rulesState.enabled.isEmpty) {
       state = _copy(
           error: rulesState.rules.isEmpty
-              ? '规则库为空：草稿只能依据回复规则生成，请先在学习中心 / 知识库 / 规则库生成规则'
-              : '当前规则全部处于停用状态，请先在规则库启用规则');
+              ? const L10nMsg('draftsErrRulesEmpty')
+              : const L10nMsg('draftsErrRulesDisabled'));
       return null;
     }
 
@@ -1380,7 +1398,7 @@ class DraftsController extends Notifier<DraftsState> {
       await reload();
       return record.id;
     } catch (e) {
-      state = _copy(error: '生成草稿失败：$e');
+      state = _copy(error: L10nMsg('draftsErrGenerateFailed', [errToMsg(e)]));
       return null;
     }
   }
@@ -1390,12 +1408,12 @@ class DraftsController extends Notifier<DraftsState> {
   Future<bool> send(DraftRecord record, String finalText) async {
     final space = ref.read(currentSpaceProvider).space;
     if (space == null) {
-      state = _copy(error: '请先创建空间');
+      state = _copy(error: const L10nMsg('draftsErrNeedSpace'));
       return false;
     }
     final sender = space.resolveSender(record.accountId);
     if (sender == null || !sender.isSendConfigured) {
-      state = _copy(error: '当前空间没有可用于发信的账号（请在空间管理中开启账号的发信能力）');
+      state = _copy(error: const L10nMsg('draftsErrNoSender'));
       return false;
     }
     final mail =
@@ -1409,13 +1427,13 @@ class DraftsController extends Notifier<DraftsState> {
         ccAddresses: record.extraCc,
       );
     } catch (e) {
-      state = _copy(error: '发送失败：$e');
+      state = _copy(error: L10nMsg('draftsErrSendFailed', [errToMsg(e)]));
       return false;
     }
 
     // 判断是否修改 + 反馈学习。
-    final feedbackMessage =
-        '已发送。${await _runFeedbackLearning(record, finalText)}';
+    final feedbackMessage = L10nMsg(
+        'draftsFbSent', [await _runFeedbackLearning(record, finalText)]);
     record
       ..sentAt = DateTime.now()
       ..status = record.wasModified
@@ -1433,8 +1451,8 @@ class DraftsController extends Notifier<DraftsState> {
   /// 规则反馈学习（发送与手工标注共用）：对比原始草稿与实际文本，
   /// 写回 record 的 finalSentText / wasModified / diffSummary / ruleUpdates。
   ///
-  /// 返回学习结果描述（不含「已发送。」前缀，由调用方拼接）。
-  Future<String> _runFeedbackLearning(
+  /// 返回学习结果描述（结构化消息，由调用方嵌进「已发送。」等前缀）。
+  Future<L10nMsg> _runFeedbackLearning(
       DraftRecord record, String finalText) async {
     final llm = ref.read(llmClientProvider);
     final modified =
@@ -1450,20 +1468,24 @@ class DraftsController extends Notifier<DraftsState> {
           ..wasModified = result.wasModified
           ..diffSummary = result.diffSummary
           ..ruleUpdates = result.ruleUpdates;
-        return result.wasModified
-            ? '检测到修改，规则库已优化：${result.ruleUpdates.isEmpty ? "本次无需调整" : result.ruleUpdates.map((u) => "[${u.action}] ${u.summary}").join("；")}'
-            : '草稿未被修改，相关规则获得正反馈';
+        if (!result.wasModified) return const L10nMsg('draftsFbUnmodified');
+        // ruleUpdates 摘要是模型产出的中文数据，按原文拼接展示。
+        return result.ruleUpdates.isEmpty
+            ? const L10nMsg('draftsFbModifiedNoAdjust')
+            : L10nMsg('draftsFbModifiedUpdates', [
+                result.ruleUpdates.map((u) => "[${u.action}] ${u.summary}").join("；")
+              ]);
       } catch (e) {
         record
           ..finalSentText = finalText
           ..wasModified = modified;
-        return '但规则反馈学习失败：$e';
+        return L10nMsg('draftsFbFailed', [errToMsg(e)]);
       }
     }
     record
       ..finalSentText = finalText
       ..wasModified = modified;
-    return '（未配置大模型，跳过规则反馈学习）';
+    return const L10nMsg('draftsFbSkipped');
   }
 
   Future<void> discard(DraftRecord record) async {
@@ -1492,10 +1514,11 @@ class DraftsController extends Notifier<DraftsState> {
   Future<bool> markManuallySent(DraftRecord record,
       {required bool runFeedback}) async {
     final finalText = record.effectiveText;
-    var feedbackMessage = '已标注为手工发送。该内容会计入后续草稿生成与学习的参考。';
+    var feedbackMessage = const L10nMsg('draftsMarkedPlain');
     if (runFeedback) {
-      feedbackMessage =
-          '已标注为手工发送。${await _runFeedbackLearning(record, finalText)}';
+      feedbackMessage = L10nMsg(
+          'draftsMarkedWithFeedback',
+          [await _runFeedbackLearning(record, finalText)]);
     } else {
       record.finalSentText = finalText;
     }
@@ -1516,7 +1539,7 @@ class DraftsController extends Notifier<DraftsState> {
       DraftRecord record, String instruction) async {
     final llm = ref.read(llmClientProvider);
     if (llm == null) {
-      throw StateError(ref.read(llmUnavailableReasonProvider));
+      throw LocalizedError(ref.read(llmUnavailableReasonProvider));
     }
     final space = ref.read(currentSpaceProvider).space;
     final historyText = record.chatHistory
@@ -1535,7 +1558,7 @@ class DraftsController extends Notifier<DraftsState> {
     final brief = (map['brief'] as String?)?.trim() ?? '已按指示修改草稿';
     final body = (map['body'] as String?)?.trim() ?? '';
     if (body.isEmpty) {
-      throw const FormatException('模型未返回修改后的正文');
+      throw const LocalizedError(L10nMsg('draftsErrNoBody'));
     }
     final now = DateTime.now().toIso8601String();
     record
@@ -1549,7 +1572,7 @@ class DraftsController extends Notifier<DraftsState> {
     return (brief: brief, body: body);
   }
 
-  DraftsState _copy({bool? generating, String? error, String? message}) =>
+  DraftsState _copy({bool? generating, L10nMsg? error, L10nMsg? message}) =>
       DraftsState(
         records: state.records,
         generating: generating ?? state.generating,

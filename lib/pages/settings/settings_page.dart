@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../l10n/l10n_ext.dart';
+import '../../l10n/model_labels.dart';
+import '../../l10n/resolve_msg.dart';
 import '../../models/app_config.dart';
 import '../../models/llm_profile.dart';
 import '../../models/rule.dart';
 import '../../providers/app_providers.dart';
+import '../../providers/locale_provider.dart';
 import '../../services/llm_client.dart';
 import '../../services/paths.dart';
 import '../../services/rule_generators.dart';
@@ -30,6 +34,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final profiles = ref.watch(llmProfilesProvider).profiles;
     final rulesCount = ref.watch(rulesProvider).enabled.length;
     final assigned =
@@ -38,25 +43,51 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
-        Text('设置', style: Theme.of(context).textTheme.headlineSmall),
+        Text(l10n.navSettings, style: Theme.of(context).textTheme.headlineSmall),
         const SizedBox(height: 4),
         Text(
-          '当前空间启用规则 $rulesCount 条 · 数据目录 ${AppPaths.instance.root}',
+          l10n.settingsSummary(rulesCount, AppPaths.instance.root),
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 16),
 
+        // ---------------- 通用 ----------------
+        _section(
+          title: l10n.settingsGeneralTitle,
+          children: [
+            Row(children: [
+              Text(l10n.settingsLanguageLabel),
+              const SizedBox(width: 16),
+              Consumer(builder: (context, ref, _) {
+                final locale = ref.watch(localeProvider);
+                return DropdownButton<Locale?>(
+                  value: locale,
+                  items: [
+                    DropdownMenuItem(
+                        value: null, child: Text(l10n.settingsLanguageSystem)),
+                    const DropdownMenuItem(
+                        value: Locale('zh'), child: Text('简体中文')),
+                    const DropdownMenuItem(
+                        value: Locale('en'), child: Text('English')),
+                  ],
+                  onChanged: (v) =>
+                      ref.read(localeProvider.notifier).setLocale(v),
+                );
+              }),
+            ]),
+          ],
+        ),
+
         // ---------------- 大模型 ----------------
         _section(
-          title: '大模型（全局，OpenAI 兼容接口）',
-          subtitle: '可配置多个模型端点，在「空间」页分配给各空间使用；'
-              '当前 $assigned 个空间已分配模型',
+          title: l10n.settingsLlmSectionTitle,
+          subtitle: l10n.settingsLlmSectionSubtitle(assigned),
           children: [
             if (profiles.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: Text('还没有模型配置，点击下方按钮添加',
-                    style: TextStyle(color: Colors.grey)),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(l10n.settingsLlmEmpty,
+                    style: const TextStyle(color: Colors.grey)),
               )
             else
               for (final p in profiles)
@@ -64,19 +95,19 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   dense: true,
                   contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.smart_toy_outlined),
-                  title: Text('${p.name}（${p.config.model}）'),
+                  title: Text(l10n.llmProfileTitle(p.name, p.config.model)),
                   subtitle: Text(p.config.baseUrl,
                       maxLines: 1, overflow: TextOverflow.ellipsis),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       IconButton(
-                        tooltip: '编辑',
+                        tooltip: l10n.commonEdit,
                         icon: const Icon(Icons.edit_outlined, size: 20),
                         onPressed: () => _editProfile(p),
                       ),
                       IconButton(
-                        tooltip: '删除',
+                        tooltip: l10n.commonDelete,
                         icon: const Icon(Icons.delete_outline, size: 20),
                         onPressed: () => _deleteProfile(p),
                       ),
@@ -87,34 +118,34 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             OutlinedButton.icon(
               onPressed: () => _editProfile(null),
               icon: const Icon(Icons.add),
-              label: const Text('添加大模型'),
+              label: Text(l10n.settingsAddLlm),
             ),
           ],
         ),
 
         // ---------------- 自定义 Prompt ----------------
         _section(
-          title: '自定义 Prompt 规则',
-          subtitle: '把你对回复的要求沉淀成规则（写入当前空间，与历史邮件、知识库规则一起作为草稿依据）',
+          title: l10n.settingsPromptSectionTitle,
+          subtitle: l10n.settingsPromptSectionSubtitle,
           children: [
             TextField(
               controller: _promptInput,
               maxLines: 3,
-              decoration: const InputDecoration(
-                hintText: '例如：所有退款邮件先致歉再给方案；落款用 Best regards, Amy',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                hintText: l10n.settingsPromptHint,
+                border: const OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 8),
             Wrap(spacing: 8, children: [
               FilledButton.tonalIcon(
                 icon: const Icon(Icons.auto_awesome),
-                label: const Text('经大模型拆分成规则（推荐）'),
+                label: Text(l10n.settingsPromptSplitButton),
                 onPressed: () => _addPromptRule(useLlm: true),
               ),
               OutlinedButton.icon(
                 icon: const Icon(Icons.add),
-                label: const Text('直接作为一条规则'),
+                label: Text(l10n.settingsPromptDirectButton),
                 onPressed: () => _addPromptRule(useLlm: false),
               ),
             ]),
@@ -126,9 +157,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   .where((r) => r.source.type == RuleSourceType.userPrompt)
                   .toList();
               if (promptsRules.isEmpty) {
-                return const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 8),
-                  child: Text('暂无自定义 Prompt 规则', style: TextStyle(color: Colors.grey)),
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text(l10n.settingsPromptEmpty,
+                      style: const TextStyle(color: Colors.grey)),
                 );
               }
               return Column(
@@ -155,6 +187,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   Future<void> _editProfile(LlmProfile? existing) async {
+    final l10n = context.l10n;
     final isEdit = existing != null;
     final name = TextEditingController(text: existing?.name ?? '');
     final baseUrl = TextEditingController(text: existing?.config.baseUrl ?? '');
@@ -168,28 +201,29 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         TextEditingController(text: '${existing?.config.timeoutSeconds ?? 120}');
     var testing = false;
     String? testResult;
+    var testOk = false;
 
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text(isEdit ? '编辑大模型' : '添加大模型'),
+          title: Text(isEdit ? l10n.settingsEditLlmTitle : l10n.settingsAddLlmTitle),
           content: SizedBox(
             width: 480,
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _field(name, '名称（如 DeepSeek、公司 GPT）'),
-                  _field(baseUrl, 'API 地址（通常以 /v1 结尾），如 https://api.deepseek.com/v1'),
-                  _field(model, '模型名称，如 deepseek-chat'),
-                  _field(apiKey, 'API Key（编辑时留空保持不变）', obscure: true),
+                  _field(name, l10n.settingsLlmFieldName),
+                  _field(baseUrl, l10n.settingsLlmFieldBaseUrl),
+                  _field(model, l10n.settingsLlmFieldModel),
+                  _field(apiKey, l10n.settingsLlmFieldApiKey, obscure: true),
                   Row(children: [
-                    Expanded(child: _field(temperature, '温度', num: true)),
+                    Expanded(child: _field(temperature, l10n.settingsLlmFieldTemperature, num: true)),
                     const SizedBox(width: 12),
-                    Expanded(child: _field(maxTokens, '最大 tokens', num: true)),
+                    Expanded(child: _field(maxTokens, l10n.settingsLlmFieldMaxTokens, num: true)),
                     const SizedBox(width: 12),
-                    Expanded(child: _field(timeout, '超时（秒）', num: true)),
+                    Expanded(child: _field(timeout, l10n.settingsLlmFieldTimeout, num: true)),
                   ]),
                   OutlinedButton.icon(
                     onPressed: testing
@@ -216,8 +250,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                             final error = await client.testConnection();
                             setDialogState(() {
                               testing = false;
-                              testResult = error ??
-                                  '连接成功（${client.probedEndpoint ?? client.endpoint}）';
+                              testOk = error == null;
+                              testResult = error == null
+                                  ? l10n.settingsLlmTestOk(
+                                      client.probedEndpoint ?? client.endpoint)
+                                  : resolveL10nMsg(l10n, error);
                             });
                           },
                     icon: testing
@@ -226,7 +263,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                             height: 14,
                             child: CircularProgressIndicator(strokeWidth: 2))
                         : const Icon(Icons.wifi_tethering),
-                    label: Text(testing ? '测试中…' : '测试连接'),
+                    label: Text(testing ? l10n.commonTesting : l10n.commonTestConnection),
                   ),
                   if (testResult != null)
                     Padding(
@@ -234,9 +271,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       child: Text(
                         testResult!,
                         style: TextStyle(
-                          color: testResult!.contains('成功')
-                              ? Colors.green
-                              : Colors.red,
+                          color: testOk ? Colors.green : Colors.red,
                         ),
                       ),
                     ),
@@ -247,11 +282,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消'),
+              child: Text(l10n.commonCancel),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('保存'),
+              child: Text(l10n.commonSave),
             ),
           ],
         ),
@@ -276,18 +311,19 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           );
     } else {
       await ref.read(llmProfilesProvider.notifier).create(
-            name.text.trim().isEmpty ? '未命名模型' : name.text.trim(),
+            name.text.trim().isEmpty ? l10n.settingsLlmUnnamed : name.text.trim(),
             config: config,
             apiKey: apiKey.text,
           );
     }
     if (mounted) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('已保存大模型配置')));
+          .showSnackBar(SnackBar(content: Text(l10n.settingsLlmSaved)));
     }
   }
 
   Future<void> _deleteProfile(LlmProfile profile) async {
+    final l10n = context.l10n;
     final spacesUsing = ref
         .read(spacesProvider)
         .spaces
@@ -297,20 +333,20 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('删除大模型「${profile.name}」'),
+        title: Text(l10n.settingsLlmDeleteTitle(profile.name)),
         content: Text(spacesUsing.isEmpty
-            ? '该模型未被任何空间使用。'
-            : '以下空间正在使用该模型，删除后将变为未分配：\n${spacesUsing.join('、')}'),
+            ? l10n.settingsLlmDeleteUnused
+            : l10n.settingsLlmDeleteInUse(spacesUsing.join(l10n.commonJoinSeparator))),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
+            child: Text(l10n.commonCancel),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
                 backgroundColor: Theme.of(context).colorScheme.error),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('删除'),
+            child: Text(l10n.commonDelete),
           ),
         ],
       ),
@@ -320,16 +356,17 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   Future<void> _addPromptRule({required bool useLlm}) async {
+    final l10n = context.l10n;
     final text = _promptInput.text.trim();
     if (text.isEmpty) return;
     final llm = ref.read(llmClientProvider);
 
     if (useLlm) {
       if (llm == null) {
-        _toast(ref.read(llmUnavailableReasonProvider));
+        _toast(resolveL10nMsg(l10n, ref.read(llmUnavailableReasonProvider)));
         return;
       }
-      _toast('正在拆分规则…');
+      _toast(l10n.settingsPromptSplitting);
       try {
         final generator = RuleGenerators(
             llm: llm, store: ref.read(rulesProvider.notifier).store);
@@ -339,7 +376,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         final confirmed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('确认生成的规则'),
+            title: Text(l10n.settingsPromptConfirmTitle),
             content: SizedBox(
               width: 440,
               child: StatefulBuilder(
@@ -352,7 +389,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         onChanged: (v) =>
                             setDialogState(() => checks[i] = v ?? false),
                         title: Text(drafts[i].$2),
-                        subtitle: Text(drafts[i].$1.label),
+                        subtitle: Text(ruleCategoryLabel(l10n, drafts[i].$1)),
                         dense: true,
                       ),
                   ],
@@ -362,11 +399,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
-                child: const Text('取消'),
+                child: Text(l10n.commonCancel),
               ),
               FilledButton(
                 onPressed: () => Navigator.pop(context, true),
-                child: const Text('添加选中项'),
+                child: Text(l10n.settingsPromptAddSelected),
               ),
             ],
           ),
@@ -389,10 +426,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         await ref.read(rulesProvider.notifier).reload();
         if (added > 0) {
           _promptInput.clear();
-          _toast('已添加 $added 条规则');
+          _toast(l10n.settingsPromptAddedRules(added));
         }
       } catch (e) {
-        _toast('拆分失败：$e');
+        _toast(l10n.settingsPromptSplitFailed(e.toString()));
       }
     } else {
       await ref.read(rulesProvider.notifier).store.add(
@@ -405,7 +442,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             ),
           );
       await ref.read(rulesProvider.notifier).reload();
-      _toast('已添加规则');
+      _toast(l10n.settingsPromptAddedOne);
       _promptInput.clear();
     }
   }

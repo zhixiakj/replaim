@@ -1,24 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'l10n/app_localizations.dart';
 import 'pages/home_page.dart';
+import 'providers/locale_provider.dart';
 
-class ReplaimApp extends StatelessWidget {
+class ReplaimApp extends ConsumerWidget {
   const ReplaimApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return MaterialApp(
-      title: 'Replaim 客服邮件助手',
+      onGenerateTitle: (context) => AppLocalizations.of(context)!.appTitle,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2F6FED)),
         fontFamily: 'PingFang SC',
       ),
-      locale: const Locale('zh', 'CN'),
-      supportedLocales: const [Locale('zh', 'CN'), Locale('en', 'US')],
+      // null = 跟随系统；supportedLocales 顺序 [en, zh] 保证非中英环境回落英文。
+      locale: ref.watch(localeProvider),
+      supportedLocales: AppLocalizations.supportedLocales,
       localizationsDelegates: const [
+        AppLocalizations.delegate,
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,

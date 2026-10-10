@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../l10n/date_format.dart';
+import '../../l10n/l10n_ext.dart';
+import '../../l10n/resolve_msg.dart';
 import '../../models/conversation.dart';
 import '../../models/draft_record.dart';
 import '../../models/email_summary.dart';
@@ -40,6 +43,7 @@ class _InboxPageState extends ConsumerState<InboxPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final state = ref.watch(inboxProvider);
     final selected = state.selectedConversation;
 
@@ -54,7 +58,7 @@ class _InboxPageState extends ConsumerState<InboxPage> {
                 padding: const EdgeInsets.all(12),
                 child: Row(
                   children: [
-                    Text('邮件列表', style: Theme.of(context).textTheme.titleLarge),
+                    Text(l10n.navInbox, style: Theme.of(context).textTheme.titleLarge),
                     const Spacer(),
                     if (state.loading)
                       const SizedBox(
@@ -64,18 +68,18 @@ class _InboxPageState extends ConsumerState<InboxPage> {
                       )
                     else
                       PopupMenuButton<String>(
-                        tooltip: '刷新',
+                        tooltip: l10n.inboxRefreshTooltip,
                         icon: const Icon(Icons.refresh),
                         onSelected: (value) => ref
                             .read(inboxProvider.notifier)
                             .refresh(fullResync: value == 'full'),
-                        itemBuilder: (_) => const [
+                        itemBuilder: (_) => [
                           PopupMenuItem(
                               value: 'incremental',
-                              child: Text('刷新（只拉新邮件）')),
+                              child: Text(l10n.inboxRefreshIncremental)),
                           PopupMenuItem(
                               value: 'full',
-                              child: Text('完全刷新（重建缓存）')),
+                              child: Text(l10n.inboxRefreshFull)),
                         ],
                       ),
                   ],
@@ -85,20 +89,24 @@ class _InboxPageState extends ConsumerState<InboxPage> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
                   child: Text(
-                    state.syncingLabel!,
+                    resolveL10nMsg(l10n, state.syncingLabel!),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                 ),
-              if (state.error != null)
+              if (state.errors.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Text(state.error!,
-                      style: const TextStyle(color: Colors.red)),
+                  child: Text(
+                    state.errors
+                        .map((e) => resolveL10nMsg(l10n, e))
+                        .join(l10n.commonErrorSeparator),
+                    style: const TextStyle(color: Colors.red),
+                  ),
                 ),
               Expanded(
                 child: state.conversations.isEmpty && !state.loading
-                    ? const Center(child: Text('暂无邮件，请先在空间中配置账号并刷新'))
+                    ? Center(child: Text(l10n.inboxEmpty))
                     : Scrollbar(
                         controller: _listScrollController,
                         child: ListView.builder(
@@ -123,7 +131,7 @@ class _InboxPageState extends ConsumerState<InboxPage> {
         const VerticalDivider(width: 1, thickness: 1),
         Expanded(
           child: selected == null
-              ? const Center(child: Text('选择一个会话查看往来'))
+              ? Center(child: Text(l10n.inboxNoSelection))
               : _ChatDetail(conversation: selected),
         ),
       ],
@@ -140,16 +148,10 @@ String _formatShortDate(DateTime? date) {
   return '$mm-$dd $hh:$mi';
 }
 
-/// 详情弹窗用的完整时间：2026-10-08（周三）14:32。
-String _formatFullDate(DateTime? date) {
+/// 详情弹窗用的完整时间：zh「2026-10-08（周三）14:32」/ en「Wed, Oct 8, 2026 14:32」。
+String _formatFullDate(BuildContext context, DateTime? date) {
   if (date == null) return '';
-  const weekdays = ['一', '二', '三', '四', '五', '六', '日'];
-  final y = date.year.toString().padLeft(4, '0');
-  final mm = date.month.toString().padLeft(2, '0');
-  final dd = date.day.toString().padLeft(2, '0');
-  final hh = date.hour.toString().padLeft(2, '0');
-  final mi = date.minute.toString().padLeft(2, '0');
-  return '$y-$mm-$dd（周${weekdays[date.weekday - 1]}）$hh:$mi';
+  return formatDateTimeWithWeekday(context, date);
 }
 
 /// 头像底色：按参与人串做稳定散列取色相，同一会话跨重启颜色不变
@@ -175,11 +177,12 @@ class _ConversationTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final last = conversation.lastMessage;
     final title = conversation.participants.isEmpty
-        ? '（本空间内部往来）'
-        : conversation.participants.join('、');
-    final snippet = last.snippet.isEmpty ? '（无正文）' : last.snippet;
+        ? l10n.inboxInternalConversation
+        : conversation.participants.join(l10n.commonJoinSeparator);
+    final snippet = last.snippet.isEmpty ? l10n.inboxNoBody : last.snippet;
     return ListTileTheme(
       data: ListTileThemeData(
         selectedColor: Theme.of(context).colorScheme.onPrimaryContainer,
@@ -201,7 +204,7 @@ class _ConversationTile extends StatelessWidget {
           children: [
             if (conversation.hasForwarded) ...[
               Tooltip(
-                message: '会话中含转发邮件，原始收件不在本空间账号内',
+                message: l10n.inboxForwardedTooltip,
                 child: Icon(Icons.forward_to_inbox,
                     size: 16, color: Colors.orange.shade800),
               ),
@@ -218,7 +221,7 @@ class _ConversationTile extends StatelessWidget {
             if (conversation.replied) ...[
               const SizedBox(width: 6),
               _ReplyBadge(
-                label: '已回',
+                label: l10n.inboxRepliedBadge,
                 background: Colors.green.shade100,
                 color: Colors.green.shade900,
               ),
@@ -226,7 +229,7 @@ class _ConversationTile extends StatelessWidget {
           ],
         ),
         subtitle: Text(
-          conversation.lastFromMe ? '我：$snippet' : snippet,
+          conversation.lastFromMe ? l10n.inboxMePrefix(snippet) : snippet,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
@@ -360,6 +363,7 @@ class _ChatDetailState extends ConsumerState<_ChatDetail> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final conv = widget.conversation;
     final inbox = ref.watch(inboxProvider);
     final drafts = ref.watch(draftsProvider);
@@ -367,8 +371,9 @@ class _ChatDetailState extends ConsumerState<_ChatDetail> {
     final space = ref.watch(currentSpaceProvider).space;
     final selected = inbox.selectedMessage;
     final convDrafts = _visibleDrafts(conv, drafts.records);
-    final title =
-        conv.participants.isEmpty ? '（本空间内部往来）' : conv.participants.join('、');
+    final title = conv.participants.isEmpty
+        ? l10n.inboxInternalConversation
+        : conv.participants.join(l10n.commonJoinSeparator);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -389,8 +394,8 @@ class _ChatDetailState extends ConsumerState<_ChatDetail> {
               ),
               const SizedBox(height: 2),
               Text(
-                  '${conv.messages.length} 封往来（含已发出）'
-                  '${convDrafts.isEmpty ? '' : ' · ${convDrafts.length} 份草稿'}',
+                  '${l10n.inboxMessagesCount(conv.messages.length)}'
+                  '${convDrafts.isEmpty ? '' : ' · ${l10n.inboxDraftsCount(convDrafts.length)}'}',
                   style: Theme.of(context).textTheme.bodySmall),
             ],
           ),
@@ -403,9 +408,9 @@ class _ChatDetailState extends ConsumerState<_ChatDetail> {
                 child: Text(
                   selected == null
                       ? (conv.latestIncoming == null
-                          ? '本会话暂无对方来件，无法生成草稿'
-                          : '点击对方邮件气泡后可生成草稿')
-                      : '选中：${selected.subject}',
+                          ? l10n.inboxNoIncoming
+                          : l10n.inboxTapToSelect)
+                      : l10n.inboxSelected(selected.subject),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context)
@@ -425,7 +430,7 @@ class _ChatDetailState extends ConsumerState<_ChatDetail> {
                         height: 14,
                         child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.auto_awesome),
-                label: Text(generating ? '生成中…' : '依据规则生成草稿'),
+                label: Text(generating ? l10n.inboxGenerating : l10n.inboxGenerateDraft),
               ),
             ],
           ),
@@ -439,7 +444,7 @@ class _ChatDetailState extends ConsumerState<_ChatDetail> {
         if (drafts.error != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Text(drafts.error!,
+            child: Text(resolveL10nMsg(l10n, drafts.error!),
                 style: const TextStyle(color: Colors.red)),
           ),
         const Divider(height: 1),
@@ -549,6 +554,7 @@ class _ForwardedWarning extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       child: Card(
@@ -563,9 +569,10 @@ class _ForwardedWarning extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  '检测到转发：客户原始收件地址为 ${email.originalRecipients.join('、')}，'
-                  '（不在本空间账号内）。生成草稿时会默认通过 $accountEmail 发送并抄送上述地址，'
-                  '可在草稿页调整。',
+                  l10n.inboxForwardedWarning(
+                    email.originalRecipients.join(l10n.commonJoinSeparator),
+                    accountEmail,
+                  ),
                   style: const TextStyle(height: 1.4),
                 ),
               ),
@@ -603,9 +610,15 @@ class _DraftBubbleState extends ConsumerState<_DraftBubble> {
         .send(record, record.effectiveText);
     if (!mounted) return;
     setState(() => _busy = false);
+    final l10n = context.l10n;
+    final state = ref.read(draftsProvider);
     final msg = ok
-        ? (ref.read(draftsProvider).feedbackMessage ?? '已发送')
-        : (ref.read(draftsProvider).error ?? '发送失败');
+        ? (state.feedbackMessage == null
+            ? l10n.inboxSentFallback
+            : resolveL10nMsg(l10n, state.feedbackMessage!))
+        : (state.error == null
+            ? l10n.inboxSendFailed
+            : resolveL10nMsg(l10n, state.error!));
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(msg)));
   }
@@ -620,9 +633,11 @@ class _DraftBubbleState extends ConsumerState<_DraftBubble> {
         .markManuallySent(record, runFeedback: confirmed.runFeedback);
     if (!mounted) return;
     setState(() => _busy = false);
+    final feedback = ref.read(draftsProvider).feedbackMessage;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(ref.read(draftsProvider).feedbackMessage ??
-            '已标注为已发送')));
+        content: Text(feedback == null
+            ? context.l10n.inboxMarkedSentFallback
+            : resolveL10nMsg(context.l10n, feedback))));
   }
 
   Future<void> _delete() async {
@@ -633,13 +648,15 @@ class _DraftBubbleState extends ConsumerState<_DraftBubble> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final scheme = Theme.of(context).colorScheme;
     final editing = record.status == DraftStatus.editing;
     final manual = record.status == DraftStatus.sentManually;
     final (chipColor, chipText) = switch (record.status) {
-      DraftStatus.editing => (Colors.orange.shade800, '草稿'),
-      DraftStatus.sentManually => (Colors.green.shade800, '已发送 · 手工标注'),
-      _ => (Colors.green.shade800, '已发送'),
+      DraftStatus.editing => (Colors.orange.shade800, l10n.inboxChipDraft),
+      DraftStatus.sentManually =>
+        (Colors.green.shade800, l10n.inboxChipSentManual),
+      _ => (Colors.green.shade800, l10n.inboxChipSent),
     };
     final date = _formatShortDate(DateTime.tryParse(
         record.sentAt?.toIso8601String() ?? record.createdAt));
@@ -698,7 +715,7 @@ class _DraftBubbleState extends ConsumerState<_DraftBubble> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  '回复：${record.subject}',
+                  l10n.inboxReplySubject(record.subject),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -718,8 +735,8 @@ class _DraftBubbleState extends ConsumerState<_DraftBubble> {
           const SizedBox(height: 4),
           Text(
             editing
-                ? '$date · 未发送的草稿不会计入后续草稿生成与学习'
-                : '$date · 已计入后续草稿生成与学习的参考',
+                ? l10n.inboxDraftPendingNote(date)
+                : l10n.inboxDraftCountedNote(date),
             style:
                 TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
           ),
@@ -729,17 +746,17 @@ class _DraftBubbleState extends ConsumerState<_DraftBubble> {
             runSpacing: 2,
             children: [
               if (editing) ...[
-                action(Icons.edit, '编辑', () => Navigator.of(context).push(
+                action(Icons.edit, l10n.commonEdit, () => Navigator.of(context).push(
                       MaterialPageRoute(
                           builder: (_) =>
                               DraftEditPage(draftId: record.id)),
                     )),
-                action(Icons.send, _busy ? '发送中…' : '发送', _send),
-                action(Icons.mark_email_read_outlined, '标注已发送',
+                action(Icons.send, _busy ? l10n.commonSending : l10n.commonSend, _send),
+                action(Icons.mark_email_read_outlined, l10n.inboxMarkSent,
                     _markSent),
               ],
               if (editing || manual)
-                action(Icons.delete_outline, '删除', _delete),
+                action(Icons.delete_outline, l10n.commonDelete, _delete),
             ],
           ),
         ],
@@ -767,6 +784,7 @@ class _MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final scheme = Theme.of(context).colorScheme;
     final body = email.bodyText.isEmpty ? email.snippet : email.bodyText;
     // Listener 在指针下压阶段即触发（先于子组件手势竞技），
@@ -824,7 +842,7 @@ class _MessageBubble extends StatelessWidget {
               Align(
                 alignment: Alignment.centerRight,
                 child: Tooltip(
-                  message: '邮件详情',
+                  message: l10n.inboxEmailDetails,
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onTap: () => _showEmailDetails(context, email),
@@ -833,7 +851,7 @@ class _MessageBubble extends StatelessWidget {
                       children: [
                         Text(
                           '${_formatShortDate(email.parsedDate)} · '
-                          '${fromMe ? '经 $accountEmail 发出' : '收信 $accountEmail'}',
+                          '${fromMe ? l10n.inboxSentVia(accountEmail) : l10n.inboxReceivedVia(accountEmail)}',
                           style: TextStyle(
                             fontSize: 11,
                             color: scheme.onSurfaceVariant,
@@ -906,6 +924,7 @@ class _EmailDetailsDialogState extends ConsumerState<_EmailDetailsDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final scheme = Theme.of(context).colorScheme;
     final email = _liveOf(ref.watch(inboxProvider).messages);
     final pending = email.uid != null &&
@@ -940,7 +959,7 @@ class _EmailDetailsDialogState extends ConsumerState<_EmailDetailsDialog> {
                   ),
                   IconButton(
                     icon: const Icon(Icons.close, size: 20),
-                    tooltip: '关闭',
+                    tooltip: l10n.commonClose,
                     onPressed: () => Navigator.of(context).pop(),
                   ),
                 ],
@@ -959,7 +978,7 @@ class _EmailDetailsDialogState extends ConsumerState<_EmailDetailsDialog> {
                           label: 'cc', value: email.ccAddresses.join(', ')),
                     _DetailRow(
                         label: 'date',
-                        value: _formatFullDate(email.parsedDate)),
+                        value: _formatFullDate(context, email.parsedDate)),
                     if (email.mailedBy.isNotEmpty)
                       _DetailRow(label: 'mailed-by', value: email.mailedBy),
                     if (email.signedBy.isNotEmpty)
@@ -980,8 +999,8 @@ class _EmailDetailsDialogState extends ConsumerState<_EmailDetailsDialog> {
                     ],
                     Text(
                       _attemptDone
-                          ? '未获取到发件认证信息（该邮件可能未提供，或网络不可用）'
-                          : '正在获取发件认证信息…',
+                          ? l10n.inboxAuthInfoMissing
+                          : l10n.inboxAuthInfoLoading,
                       style: TextStyle(
                           fontSize: 11.5, color: scheme.onSurfaceVariant),
                     ),
@@ -1019,7 +1038,7 @@ class _DetailRow extends StatelessWidget {
           ),
           Expanded(
             child: Text(
-              value.isEmpty ? '（空）' : value,
+              value.isEmpty ? context.l10n.commonEmptyValue : value,
               style: const TextStyle(fontSize: 13, height: 1.45),
             ),
           ),

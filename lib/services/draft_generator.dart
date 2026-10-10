@@ -1,3 +1,4 @@
+import '../l10n/messages.dart';
 import '../models/draft_record.dart';
 import '../models/email_summary.dart';
 import '../models/rule.dart';
@@ -84,7 +85,7 @@ class DraftGenerator {
     required String outputLanguage,
   }) async {
     if (rules.isEmpty) {
-      throw StateError('规则库为空，请先从历史邮件、知识库或自定义 Prompt 生成回复规则');
+      throw const LocalizedError(L10nMsg('draftsErrRulesEmptyGen'));
     }
 
     // 线程上下文压缩：超过 3 封时让 LLM 摘要，避免上下文过长。
